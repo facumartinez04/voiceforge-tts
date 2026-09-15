@@ -140,9 +140,14 @@ const CONFIG_ENV_KEYS = {
     disconnectedVideoUrl: 'DISCONNECTED_VIDEO_URL',
     idleStopMinutes: 'IDLE_STOP_MINUTES',
     neverStreamedStopMinutes: 'NEVER_STREAMED_STOP_MINUTES',
+    webhookUrl: 'WEBHOOK_URL',
+    webhookSecret: 'WEBHOOK_SECRET',
+    webhookEnabled: 'WEBHOOK_ENABLED',
+    webhookEventsEnabled: 'WEBHOOK_EVENTS_ENABLED',
+    webhookAlertsEnabled: 'WEBHOOK_ALERTS_ENABLED',
 };
 const CONFIG_DEFAULTS = {
-    rtmpServerUrl: '',
+    rtmpServerUrl: 'rtmp://host.docker.internal:1935/ingest',
     streamKeyTemplate: '{instance}',
     watchUrlTemplate: '',
     mainWatchUrlTemplate: '',
@@ -160,6 +165,11 @@ const CONFIG_DEFAULTS = {
     // of the two limits is hit first wins; an active stream (outputActive)
     // always resets both and keeps the instance up regardless of either.
     neverStreamedStopMinutes: '40',
+    webhookUrl: '',
+    webhookSecret: 'wh_irl_k9G4mTzXp2sR7vBnQ8dF',
+    webhookEnabled: 'true',
+    webhookEventsEnabled: 'true',
+    webhookAlertsEnabled: 'true',
 };
 
 function readGlobalConfig() {
@@ -333,7 +343,7 @@ function rotatePublicAlias(name) {
 function callPluginWs(port, password, command, data = {}, timeoutMs = 8000) {
     return new Promise((resolve, reject) => {
         const url = `ws://127.0.0.1:${port}/` + (password ? `?password=${encodeURIComponent(password)}` : '');
-        const ws = new WebSocket(url);
+        const ws = new WebSocket(url, { perMessageDeflate: false });
         const messageId = Math.random().toString(36).slice(2, 10);
         const timer = setTimeout(() => {
             ws.terminate();
@@ -514,6 +524,343 @@ function obsRequest(port, password, requestType, requestData = {}) {
         });
         ws.on('error', (err) => { clearTimeout(timer); reject(err); });
     });
+}
+
+// In-memory cache for delta bitrate and skipped-frame calculation
+const monitorHistory = new Map();
+
+// High-speed parallel metrics fetcher from obs-websocket v5
+function getObsFullMetrics(port, password, timeoutMs = 2500) {
+    const crypto = require('crypto');
+    const sha256b64 = (s) => crypto.createHash('sha256').update(s).digest('base64');
+
+    return new Promise((resolve) => {
+        let ws;
+        let settled = false;
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (ws) {
+                try { ws.removeAllListeners(); ws.terminate(); } catch {}
+            }
+            resolve(result);
+        };
+
+        const timer = setTimeout(() => {
+            finish(null);
+        }, timeoutMs);
+
+        try {
+            ws = new WebSocket(`ws://127.0.0.1:${port}`);
+        } catch (e) {
+            return finish(null);
+        }
+
+        const pendingRequests = new Map();
+        const results = {};
+
+        ws.on('open', () => {});
+        ws.on('error', () => finish(null));
+        ws.on('close', () => finish(Object.keys(results).length > 0 ? results : null));
+
+        ws.on('message', (raw) => {
+            let msg;
+            try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+            if (msg.op === 0) {
+                // Hello handshake
+                const d = msg.d;
+                const identify = { op: 1, d: { rpcVersion: 1 } };
+                if (d.authentication) {
+                    const secret = sha256b64((password || '') + d.authentication.salt);
+                    identify.d.authentication = sha256b64(secret + d.authentication.challenge);
+                }
+                ws.send(JSON.stringify(identify));
+            } else if (msg.op === 2) {
+                // Identified -> query all status points in one round-trip
+                const requests = [
+                    { type: 'GetStats', id: 'stats' },
+                    { type: 'GetStreamStatus', id: 'stream' },
+                    { type: 'GetCurrentProgramScene', id: 'scene' },
+                    { type: 'GetRecordStatus', id: 'record' },
+                    { type: 'GetVideoSettings', id: 'video' },
+                ];
+                requests.forEach((r) => {
+                    pendingRequests.set(r.id, r.type);
+                    ws.send(JSON.stringify({ op: 6, d: { requestType: r.type, requestId: r.id, requestData: {} } }));
+                });
+            } else if (msg.op === 7) {
+                // RequestResponse
+                const id = msg.d && msg.d.requestId;
+                if (id && pendingRequests.has(id)) {
+                    pendingRequests.delete(id);
+                    results[id] = msg.d.responseData || {};
+                    if (pendingRequests.size === 0) {
+                        finish(results);
+                    }
+                }
+            }
+        });
+    });
+}
+
+function computeInstanceMetrics(instance, dockerStat, obsData, noalbsData) {
+    const isRunning = /up|running/i.test(dockerStat);
+    const now = Date.now();
+
+    if (!isRunning || !obsData) {
+        return {
+            name: instance.name,
+            status: dockerStat || 'stopped',
+            connected: false,
+            streaming: false,
+            recording: false,
+            health: isRunning ? 'STANDBY' : 'STOPPED',
+            activeFps: 0,
+            targetFps: 60,
+            bitrateKbps: 0,
+            cpuUsage: 0,
+            memoryMb: 0,
+            currentScene: '',
+            encodingOverloaded: false,
+            renderLagged: false,
+            networkCongested: false,
+            renderTimeMs: 0,
+            renderTimeBudgetMs: 16.67,
+            renderSkippedFrames: 0,
+            renderTotalFrames: 0,
+            encoderSkippedFrames: 0,
+            encoderTotalFrames: 0,
+            networkSkippedFrames: 0,
+            networkTotalFrames: 0,
+            networkCongestion: 0,
+            outputTimecode: '00:00:00',
+            outputDurationMs: 0,
+            noalbs: noalbsData || { enabled: false },
+            alerts: isRunning ? ['OBS WebSocket no responde o todavía está iniciando'] : ['Instancia apagada'],
+            publicAlias: instance.publicAlias || instance.name,
+            panelUrl: instance.panelUrl,
+            panelUrlHttps: instance.panelUrlHttps,
+            obsWsPort: instance.obsWsPort,
+            webPort: instance.webPort,
+        };
+    }
+
+    const stats = obsData.stats || {};
+    const stream = obsData.stream || {};
+    const scene = obsData.scene || {};
+    const record = obsData.record || {};
+    const video = obsData.video || {};
+
+    const targetFps = (video.fpsNumerator && video.fpsDenominator)
+        ? Math.round(video.fpsNumerator / video.fpsDenominator)
+        : 60;
+    const renderTimeBudgetMs = targetFps > 0 ? parseFloat((1000 / targetFps).toFixed(2)) : 16.67;
+
+    const streaming = Boolean(stream.outputActive);
+    const reconnecting = Boolean(stream.outputReconnecting);
+    const recording = Boolean(record.outputActive);
+
+    const activeFps = typeof stats.activeFps === 'number' ? parseFloat(stats.activeFps.toFixed(1)) : 0;
+    const cpuUsage = typeof stats.cpuUsage === 'number' ? parseFloat(stats.cpuUsage.toFixed(1)) : 0;
+    const memoryMb = typeof stats.memoryUsage === 'number' ? parseFloat(stats.memoryUsage.toFixed(0)) : 0;
+    const renderTimeMs = typeof stats.averageFrameRenderTime === 'number' ? parseFloat(stats.averageFrameRenderTime.toFixed(2)) : 0;
+
+    const encoderSkippedFrames = stats.outputSkippedFrames || 0;
+    const encoderTotalFrames = stats.outputTotalFrames || 0;
+    const renderSkippedFrames = stats.renderSkippedFrames || 0;
+    const renderTotalFrames = stats.renderTotalFrames || 0;
+
+    const networkSkippedFrames = stream.outputSkippedFrames || 0;
+    const networkTotalFrames = stream.outputTotalFrames || 0;
+    const networkCongestion = typeof stream.outputCongestion === 'number' ? parseFloat((stream.outputCongestion * 100).toFixed(1)) : 0;
+
+    // Calculate deltas between samples
+    const prev = monitorHistory.get(instance.name) || null;
+    let bitrateKbps = 0;
+    let dEncoderSkipped = 0;
+    let dRenderSkipped = 0;
+    let dNetworkSkipped = 0;
+
+    if (prev && prev.time) {
+        const dt = (now - prev.time) / 1000;
+        if (dt > 0.4 && dt < 40) {
+            const dBytes = Math.max(0, (stream.outputBytes || 0) - (prev.outputBytes || 0));
+            bitrateKbps = Math.round((dBytes * 8) / (dt * 1000));
+            dEncoderSkipped = Math.max(0, encoderSkippedFrames - (prev.encoderSkippedFrames || 0));
+            dRenderSkipped = Math.max(0, renderSkippedFrames - (prev.renderSkippedFrames || 0));
+            dNetworkSkipped = Math.max(0, networkSkippedFrames - (prev.networkSkippedFrames || 0));
+        }
+    }
+
+    monitorHistory.set(instance.name, {
+        time: now,
+        outputBytes: stream.outputBytes || 0,
+        encoderSkippedFrames,
+        renderSkippedFrames,
+        networkSkippedFrames,
+    });
+
+    const encoderSkippedPercent = encoderTotalFrames > 0
+        ? parseFloat(((encoderSkippedFrames / encoderTotalFrames) * 100).toFixed(2))
+        : 0;
+
+    const renderSkippedPercent = renderTotalFrames > 0
+        ? parseFloat(((renderSkippedFrames / renderTotalFrames) * 100).toFixed(2))
+        : 0;
+
+    const networkSkippedPercent = networkTotalFrames > 0
+        ? parseFloat(((networkSkippedFrames / networkTotalFrames) * 100).toFixed(2))
+        : 0;
+
+    // Encoding Overload detection ("Encoding Loader" / Sobrecarga del codificador)
+    // Occurs when hardware/software encoder is unable to keep up in real time
+    const encodingOverloaded = (streaming || recording) && (
+        dEncoderSkipped > 0 ||
+        encoderSkippedPercent > 0.8 ||
+        (encoderSkippedFrames > 10 && encoderSkippedPercent > 0.3)
+    );
+
+    const renderLagged = dRenderSkipped > 0 || renderTimeMs > (renderTimeBudgetMs * 1.05);
+    const networkCongested = dNetworkSkipped > 0 || networkCongestion > 15;
+    const fpsDropped = activeFps > 0 && activeFps < (targetFps * 0.88);
+
+    const alerts = [];
+    if (reconnecting) alerts.push('Reconectando stream con el servidor ingest/RTMP');
+    if (encodingOverloaded) alerts.push(`⚠️ SOBRECARGA DE CODIFICADOR (descartando frames: +${dEncoderSkipped} frames, total ${encoderSkippedPercent}%)`);
+    if (renderLagged) alerts.push(`Renderizado GPU al límite (${renderTimeMs}ms de ${renderTimeBudgetMs}ms)`);
+    if (networkCongested) alerts.push(`Congestión de red (${networkCongestion}% / descartados: +${dNetworkSkipped})`);
+    if (fpsDropped) alerts.push(`FPS caídos (${activeFps} de ${targetFps} FPS)`);
+
+    let health = 'OK';
+    if (!streaming) {
+        health = isRunning ? 'STANDBY' : 'STOPPED';
+    } else if (reconnecting || encodingOverloaded || (activeFps > 0 && activeFps < (targetFps * 0.75))) {
+        health = 'CRITICAL';
+    } else if (networkCongested || renderLagged || fpsDropped || cpuUsage > 85) {
+        health = 'WARNING';
+    } else {
+        health = 'OK';
+    }
+
+    return {
+        name: instance.name,
+        status: dockerStat,
+        connected: true,
+        streaming,
+        reconnecting,
+        recording,
+        health,
+        activeFps,
+        targetFps,
+        bitrateKbps,
+        cpuUsage,
+        memoryMb,
+        currentScene: scene.currentProgramSceneName || '',
+        encodingOverloaded,
+        encoderSkippedFrames,
+        encoderTotalFrames,
+        encoderSkippedPercent,
+        dEncoderSkipped,
+        renderLagged,
+        renderTimeMs,
+        renderTimeBudgetMs,
+        renderSkippedFrames,
+        renderTotalFrames,
+        renderSkippedPercent,
+        dRenderSkipped,
+        networkCongested,
+        networkSkippedFrames,
+        networkTotalFrames,
+        networkSkippedPercent,
+        networkCongestion,
+        dNetworkSkipped,
+        outputTimecode: stream.outputTimecode || '00:00:00',
+        outputDurationMs: stream.outputDuration || 0,
+        outputBytes: stream.outputBytes || 0,
+        baseResolution: video.baseWidth && video.baseHeight ? `${video.baseWidth}x${video.baseHeight}` : '1920x1080',
+        outputResolution: video.outputWidth && video.outputHeight ? `${video.outputWidth}x${video.outputHeight}` : '1920x1080',
+        noalbs: noalbsData || { enabled: false },
+        alerts,
+        publicAlias: instance.publicAlias || instance.name,
+        panelUrl: instance.panelUrl,
+        panelUrlHttps: instance.panelUrlHttps,
+        obsWsPort: instance.obsWsPort,
+        webPort: instance.webPort,
+    };
+}
+
+async function getMonitoringData() {
+    const rows = parseRegistryRows();
+    const instances = await Promise.all(
+        rows.map(async (instance) => {
+            const dockerStat = await dockerStatus(instance.name);
+            let obsData = null;
+            let noalbsData = null;
+            if (/up|running/i.test(dockerStat)) {
+                try {
+                    const [obsRes, noalbsRes] = await Promise.all([
+                        getObsFullMetrics(instance.obsWsPort, instance.obsWsPassword, 2500),
+                        getNoalbsQuick(instance.name, instance, dockerStat).catch(() => null),
+                    ]);
+                    obsData = obsRes;
+                    noalbsData = noalbsRes;
+                } catch {}
+            }
+            return computeInstanceMetrics(instance, dockerStat, obsData, noalbsData);
+        })
+    );
+
+    let runningCount = 0;
+    let streamingCount = 0;
+    let okCount = 0;
+    let warnCount = 0;
+    let criticalCount = 0;
+    let totalBitrateKbps = 0;
+    let fpsSum = 0;
+    let fpsCount = 0;
+    let cpuSum = 0;
+    let cpuCount = 0;
+    let encodingOverloadCount = 0;
+
+    instances.forEach((inst) => {
+        if (/up|running/i.test(inst.status)) runningCount++;
+        if (inst.streaming) {
+            streamingCount++;
+            if (inst.encodingOverloaded) encodingOverloadCount++;
+            if (inst.health === 'OK') okCount++;
+            else if (inst.health === 'WARNING') warnCount++;
+            else if (inst.health === 'CRITICAL') criticalCount++;
+            if (inst.bitrateKbps > 0) totalBitrateKbps += inst.bitrateKbps;
+        } else {
+            if (inst.health === 'OK' || inst.health === 'STANDBY') okCount++;
+        }
+
+        if (inst.connected && inst.activeFps > 0) {
+            fpsSum += inst.activeFps;
+            fpsCount++;
+        }
+        if (inst.connected && inst.cpuUsage > 0) {
+            cpuSum += inst.cpuUsage;
+            cpuCount++;
+        }
+    });
+
+    const summary = {
+        totalInstances: instances.length,
+        runningCount,
+        streamingCount,
+        encodingOverloadCount,
+        okCount,
+        warnCount,
+        criticalCount,
+        totalBitrateKbps,
+        avgFps: fpsCount > 0 ? parseFloat((fpsSum / fpsCount).toFixed(1)) : 0,
+        avgCpu: cpuCount > 0 ? parseFloat((cpuSum / cpuCount).toFixed(1)) : 0,
+    };
+
+    return { summary, instances, timestamp: Date.now() };
 }
 
 async function applySavedIngest(name) {
@@ -710,6 +1057,7 @@ async function runIdleWatchdog() {
             try {
                 await run('docker', ['compose', '-p', `neko-${instance.name}`, '-f', path.join(SCRIPT_DIR, 'docker-compose.yml'), 'stop'], 60 * 1000);
                 logAudit({ admin: null }, 'instance.autostop', instance.name, { reason });
+                dispatchWebhook('neko.stopped', { instance: instance.name, reason: `Inactividad (${reason})` });
             } catch (e) {
                 console.error(`[idle-watchdog] Failed to stop '${instance.name}':`, e.message);
             }
@@ -776,7 +1124,7 @@ app.post('/instances', async (req, res) => {
     const body = req.body || {};
     const streamKey = body.streamKey || renderTemplate(cfg.streamKeyTemplate, { instance: name });
     const extraEnv = {
-        RTMP_SERVER_URL: body.rtmpServerUrl || cfg.rtmpServerUrl || '',
+        RTMP_SERVER_URL: body.rtmpServerUrl || cfg.rtmpServerUrl || 'rtmp://host.docker.internal:1935/ingest',
         STREAM_KEY: streamKey,
         DISCONNECTED_VIDEO_URL: body.disconnectedVideoUrl || cfg.disconnectedVideoUrl || '',
         INSTANCE_NAME: name,
@@ -813,6 +1161,56 @@ app.put('/config', (req, res) => {
 });
 
 // ---- GET /instances ----
+
+// ---- POST /config/webhook/test ----
+app.post('/config/webhook/test', async (req, res) => {
+    try {
+        const cfg = readGlobalConfig();
+        const testUrl = req.body?.webhookUrl || cfg.webhookUrl;
+        const testSecret = req.body?.webhookSecret || cfg.webhookSecret || 'wh_irl_k9G4mTzXp2sR7vBnQ8dF';
+
+        if (!testUrl) {
+            return res.status(400).json({ ok: false, error: 'No hay webhookUrl configurada para probar.' });
+        }
+
+        const payload = {
+            event: 'neko.critical',
+            timestamp: Date.now(),
+            instance: 'test-obs',
+            alerts: ['⚠️ Mensaje de prueba desde OBS Monitor: Webhook conectado exitosamente'],
+            metrics: {
+                activeFps: 60,
+                targetFps: 60,
+                bitrateKbps: 6000,
+                cpuUsage: 14.5,
+                encoderSkippedPercent: 0,
+                networkCongestion: 0
+            }
+        };
+
+        const response = await fetch(testUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-webhook-secret': testSecret,
+                'User-Agent': 'Neko-OBS-Monitor-Test/1.0'
+            },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(8000)
+        });
+
+        if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            return res.status(502).json({ ok: false, error: `El servidor webhook respondió con HTTP ${response.status}: ${errText.slice(0, 200)}` });
+        }
+
+        const respData = await response.json().catch(() => ({}));
+        res.json({ ok: true, message: 'Webhook de prueba enviado y recibido con éxito', response: respData });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: `Error enviando webhook de prueba: ${e.message}` });
+    }
+});
+
 app.get('/instances', async (req, res) => {
     try {
         const rows = parseRegistryRows();
@@ -845,6 +1243,319 @@ app.get('/instances/:name', async (req, res) => {
     res.json({ ok: true, instance });
 });
 
+
+// ==========================================
+// WEBHOOK DISPATCHER & REAL-TIME ALERT WATCHER
+// ==========================================
+
+async function dispatchWebhook(event, payload = {}) {
+    try {
+        const cfg = readGlobalConfig();
+        if (!cfg.webhookUrl || cfg.webhookEnabled === 'false') return;
+
+        const isEvent = event.startsWith('neko.started') || event.startsWith('neko.stopped') || event.startsWith('neko.stream') || event.startsWith('stream.');
+        const isAlert = event.startsWith('neko.critical') || event.startsWith('neko.recovered');
+
+        if (isEvent && cfg.webhookEventsEnabled === 'false') return;
+        if (isAlert && cfg.webhookAlertsEnabled === 'false') return;
+        const secret = cfg.webhookSecret || 'wh_irl_k9G4mTzXp2sR7vBnQ8dF';
+        const argTime = new Date().toLocaleTimeString('es-AR', {
+            timeZone: 'America/Argentina/Buenos_Aires',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        }) + ' (🇦🇷 ARG)';
+
+        const body = JSON.stringify({
+            event,
+            timestamp: Date.now(),
+            time: argTime,
+            ...payload
+        });
+
+        fetch(cfg.webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-webhook-secret': secret,
+                'User-Agent': 'Neko-OBS-Monitor/1.0'
+            },
+            body,
+            signal: AbortSignal.timeout(6000)
+        }).then((res) => {
+            if (!res.ok) {
+                console.warn(`[webhook] Server returned HTTP ${res.status} for ${event}`);
+            } else {
+                console.log(`[webhook] Successfully delivered ${event}`);
+            }
+        }).catch((err) => {
+            console.warn(`[webhook] Delivery failed for ${event}:`, err.message);
+        });
+    } catch (e) {
+        console.warn('[webhook] Error in dispatchWebhook:', e.message);
+    }
+}
+
+const alertTracker = new Map(); // instanceName -> { lastAlertTime: number, isAlerting: boolean }
+
+async function runAlertWatcher() {
+    try {
+        const cfg = readGlobalConfig();
+        if (!cfg.webhookUrl || cfg.webhookEnabled === 'false' || cfg.webhookAlertsEnabled === 'false') {
+            return;
+        }
+
+        const data = await getMonitoringData();
+        const instances = data.instances || [];
+        const now = Date.now();
+
+        for (const inst of instances) {
+            const isRunning = /up|running/i.test(inst.status);
+            if (!isRunning) {
+                alertTracker.delete(inst.name);
+                continue;
+            }
+
+            const isCritical = inst.health === 'CRITICAL' || inst.encodingOverloaded;
+            const hasSevereIssue = inst.streaming && (
+                inst.renderLagged ||
+                inst.networkCongested ||
+                (inst.activeFps > 0 && inst.activeFps < inst.targetFps * 0.75)
+            );
+            const isAlerting = isCritical || hasSevereIssue;
+
+            const tracked = alertTracker.get(inst.name) || { lastAlertTime: 0, isAlerting: false };
+
+            if (isAlerting) {
+                const cooldownMs = 5 * 60 * 1000; // 5 min cooldown
+                const shouldSend = !tracked.isAlerting || (now - tracked.lastAlertTime > cooldownMs);
+
+                if (shouldSend) {
+                    dispatchWebhook('neko.critical', {
+                        instance: inst.name,
+                        alerts: inst.alerts || [],
+                        metrics: {
+                            activeFps: inst.activeFps,
+                            targetFps: inst.targetFps,
+                            bitrateKbps: inst.bitrateKbps,
+                            cpuUsage: inst.cpuUsage,
+                            encoderSkippedPercent: inst.encoderSkippedPercent,
+                            networkCongestion: inst.networkCongestion
+                        }
+                    });
+                    alertTracker.set(inst.name, { lastAlertTime: now, isAlerting: true });
+                }
+            } else if (tracked.isAlerting && inst.health === 'OK') {
+                dispatchWebhook('neko.recovered', {
+                    instance: inst.name
+                });
+                alertTracker.set(inst.name, { lastAlertTime: 0, isAlerting: false });
+            }
+        }
+    } catch (e) {
+        // Suppress alert watcher error noise
+    }
+}
+
+setInterval(() => {
+    runAlertWatcher().catch(() => {});
+}, 15 * 1000);
+
+
+// ==========================================
+// AUTOMATIC CONTAINER & STREAM STATE WATCHER (PRENDER / APAGAR)
+// ==========================================
+const containerStates = new Map();
+const streamingStates = new Map();
+
+async function runStateWatcher() {
+    try {
+        const rows = parseRegistryRows();
+        for (const row of rows) {
+            const name = row.name;
+            const stat = await dockerStatus(name);
+            const isRunning = /up|running/i.test(stat);
+
+            // Container start/stop tracking
+            if (!containerStates.has(name)) {
+                containerStates.set(name, isRunning);
+            } else {
+                const wasRunning = containerStates.get(name);
+                if (!wasRunning && isRunning) {
+                    console.log(`[state-watcher] 🟢 Instancia '${name}' ENCENDIDA detectada`);
+                    containerStates.set(name, true);
+                    dispatchWebhook('neko.started', {
+                        instance: name,
+                        publicAlias: row.publicAlias || name,
+                        trigger: 'Detección Docker'
+                    });
+                } else if (wasRunning && !isRunning) {
+                    console.log(`[state-watcher] 🔴 Instancia '${name}' APAGADA detectada`);
+                    containerStates.set(name, false);
+                    streamingStates.set(name, false);
+                    dispatchWebhook('neko.stopped', {
+                        instance: name,
+                        reason: 'Contenedor detenido'
+                    });
+                }
+            }
+
+            // OBS Stream start/stop tracking (Transmisión En Vivo)
+            if (isRunning) {
+                try {
+                    const obsData = await getObsFullMetrics(row.obsWsPort, row.obsWsPassword, 1800);
+                    if (obsData && obsData.stream) {
+                        const isStreaming = Boolean(obsData.stream.outputActive);
+                        if (!streamingStates.has(name)) {
+                            streamingStates.set(name, isStreaming);
+                        } else {
+                            const wasStreaming = streamingStates.get(name);
+                            if (!wasStreaming && isStreaming) {
+                                console.log(`[state-watcher] 🟢 Transmisión OBS INICIADA en '${name}'`);
+                                streamingStates.set(name, true);
+                                dispatchWebhook('neko.stream.started', {
+                                    instance: name,
+                                    publicAlias: row.publicAlias || name,
+                                    trigger: 'OBS Stream En Vivo',
+                                    timecode: obsData.stream.outputTimecode || '00:00:00'
+                                });
+                            } else if (wasStreaming && !isStreaming) {
+                                console.log(`[state-watcher] 🔴 Transmisión OBS DETENIDA en '${name}'`);
+                                streamingStates.set(name, false);
+                                dispatchWebhook('neko.stream.stopped', {
+                                    instance: name,
+                                    publicAlias: row.publicAlias || name,
+                                    reason: 'OBS Stream Detenido'
+                                });
+                            }
+                        }
+                    }
+                } catch {}
+            }
+        }
+    } catch (e) {
+        // Suppress
+    }
+}
+
+setInterval(() => {
+    runStateWatcher().catch(() => {});
+}, 3500);
+
+// ---- GET /monitor/instances (Full multi-instance real-time snapshot) ----
+app.get('/monitor/instances', async (req, res) => {
+    try {
+        const data = await getMonitoringData();
+        res.json({ ok: true, ...data });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
+// ---- GET /monitor/stream (Server-Sent Events near real-time stream) ----
+app.get('/monitor/stream', async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders?.();
+
+    let active = true;
+    const sendUpdate = async () => {
+        if (!active) return;
+        try {
+            const data = await getMonitoringData();
+            if (active) {
+                res.write(`data: ${JSON.stringify(data)}\n\n`);
+            }
+        } catch (err) {
+            if (active) {
+                res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+            }
+        }
+    };
+
+    // Send immediately on connect
+    await sendUpdate();
+
+    // Push tick every 1500ms
+    const interval = setInterval(sendUpdate, 1500);
+
+    req.on('close', () => {
+        active = false;
+        clearInterval(interval);
+        res.end();
+    });
+});
+
+// ---- GET /instances/:name/metrics (Deep dive metrics for a single instance) ----
+app.get('/instances/:name/metrics', async (req, res) => {
+    const { name } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    try {
+        const dockerStat = await dockerStatus(name);
+        let obsData = null;
+        let noalbsData = null;
+        if (/up|running/i.test(dockerStat)) {
+            const [obsRes, noalbsRes] = await Promise.all([
+                getObsFullMetrics(instance.obsWsPort, instance.obsWsPassword, 3000),
+                getNoalbsQuick(name, instance, dockerStat).catch(() => null),
+            ]);
+            obsData = obsRes;
+            noalbsData = noalbsRes;
+        }
+        const metrics = computeInstanceMetrics(instance, dockerStat, obsData, noalbsData);
+        res.json({ ok: true, metrics, raw: obsData });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
+// ---- POST /instances/:name/action (Quick remote actions from monitor: start/stop stream, switch scene) ----
+app.post('/instances/:name/action', async (req, res) => {
+    const { name } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    const { action, sceneName } = req.body || {};
+    try {
+        let result = null;
+        if (action === 'startStream') {
+            result = await obsRequest(instance.obsWsPort, instance.obsWsPassword, 'StartStream');
+            logAudit(req, 'instance.action_startStream', name);
+            streamingStates.set(name, true);
+            dispatchWebhook('neko.stream.started', {
+                instance: name,
+                publicAlias: instance.publicAlias || name,
+                trigger: 'panel/monitor action'
+            });
+        } else if (action === 'stopStream') {
+            result = await obsRequest(instance.obsWsPort, instance.obsWsPassword, 'StopStream');
+            logAudit(req, 'instance.action_stopStream', name);
+            streamingStates.set(name, false);
+            dispatchWebhook('neko.stream.stopped', {
+                instance: name,
+                publicAlias: instance.publicAlias || name,
+                reason: 'panel/monitor action'
+            });
+        } else if (action === 'setScene' && sceneName) {
+            result = await obsRequest(instance.obsWsPort, instance.obsWsPassword, 'SetCurrentProgramScene', { sceneName });
+            logAudit(req, 'instance.action_setScene', name, { sceneName });
+        } else {
+            return res.status(400).json({ ok: false, error: 'Acción no válida o faltan parámetros (startStream, stopStream, setScene)' });
+        }
+        touchActivity(name);
+        res.json({ ok: true, action, result });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
 // ---- POST /instances/:name/start ----
 app.post('/instances/:name/start', async (req, res) => {
     const { name } = req.params;
@@ -858,6 +1569,7 @@ app.post('/instances/:name/start', async (req, res) => {
         touchActivity(name);
         applySavedIngest(name).catch((e) => console.warn(`[ingest] auto-apply error for ${name}:`, e.message));
         logAudit(req, 'instance.start', name, { publicAlias: newAlias });
+        dispatchWebhook('neko.started', { instance: name, publicAlias: newAlias, trigger: 'panel/api' });
         res.json({ ok: true, status: 'started', publicAlias: newAlias });
     } catch (e) {
         res.status(500).json({ ok: false, error: e.message, stdout: e.stdout, stderr: e.stderr });
@@ -871,6 +1583,7 @@ app.post('/instances/:name/stop', async (req, res) => {
     try {
         await run('docker', ['compose', '-p', `neko-${name}`, '-f', path.join(SCRIPT_DIR, 'docker-compose.yml'), 'stop'], 60 * 1000);
         logAudit(req, 'instance.stop', name);
+        dispatchWebhook('neko.stopped', { instance: name, reason: 'Manual / API' });
         res.json({ ok: true, status: 'stopped' });
     } catch (e) {
         res.status(500).json({ ok: false, error: e.message, stdout: e.stdout, stderr: e.stderr });
@@ -893,6 +1606,7 @@ app.post('/instances/:name/restart', async (req, res) => {
         touchActivity(name);
         applySavedIngest(name).catch((e) => console.warn(`[ingest] auto-apply error for ${name}:`, e.message));
         logAudit(req, 'instance.restart', name, { publicAlias: newAlias });
+        dispatchWebhook('neko.started', { instance: name, publicAlias: newAlias, trigger: 'panel/restart' });
         res.json({ ok: true, status: 'restarted', publicAlias: newAlias });
     } catch (e) {
         res.status(500).json({ ok: false, error: e.message, stdout: e.stdout, stderr: e.stderr });
@@ -1017,6 +1731,169 @@ app.put('/instances/:name/noalbs', async (req, res) => {
 });
 
 // ---- DELETE /instances/:name ----
+
+// ==========================================
+// MULTI-RTMP TARGETS (SALIDAS / DESTINOS)
+// ==========================================
+
+// GET /instances/:name/targets
+app.get('/instances/:name/targets', async (req, res) => {
+    const { name } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    try {
+        const resp = await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, 'GetStatus');
+        const rawTargets = resp.targets || [];
+        const targets = rawTargets.map((t) => ({
+            id: String(t.id),
+            name: t.name,
+            protocol: t.protocol || 'RTMP',
+            url: t.url,
+            key: t.rtmp || t.key || '',
+            status: t.status,
+            syncStart: Boolean(t['sync-start'] ?? t.syncStart),
+            syncStop: Boolean(t['sync-stop'] ?? t.syncStop),
+            active: t.status === 'active' || t.status === 'live' || t.status === 'streaming'
+        }));
+        res.json({ ok: true, targets });
+    } catch (e) {
+        res.status(502).json({ ok: false, error: e.message });
+    }
+});
+
+// POST /instances/:name/targets
+app.post('/instances/:name/targets', async (req, res) => {
+    const { name } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    const { targetName, protocol, url, key, syncStart } = req.body || {};
+    if (!targetName || !url) return res.status(400).json({ ok: false, error: 'targetName y url son obligatorios' });
+
+    const isSync = syncStart !== false;
+    const streamKey = (key || '').trim();
+    try {
+        const resp = await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, 'AddTarget', {
+            name: targetName.trim(),
+            protocol: protocol || 'RTMP',
+            url: url.trim(),
+            key: streamKey,
+            rtmp: streamKey,
+            'sync-start': isSync,
+            'sync-stop': isSync
+        });
+        logAudit(req, 'target.add', name, { targetName, syncStart: isSync });
+        res.json({ ok: true, resp });
+    } catch (e) {
+        res.status(502).json({ ok: false, error: e.message });
+    }
+});
+
+// PUT /instances/:name/targets/:id
+app.put('/instances/:name/targets/:id', async (req, res) => {
+    const { name, id } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    const { targetName, protocol, url, key, syncStart } = req.body || {};
+    const isSync = syncStart !== false;
+    const streamKey = key !== undefined ? key.trim() : undefined;
+    try {
+        const payload = {
+            id,
+            name: targetName ? targetName.trim() : undefined,
+            protocol: protocol || 'RTMP',
+            url: url ? url.trim() : undefined,
+            'sync-start': isSync,
+            'sync-stop': isSync
+        };
+        if (streamKey !== undefined) {
+            payload.key = streamKey;
+            payload.rtmp = streamKey;
+        }
+        const resp = await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, 'EditTarget', payload);
+        logAudit(req, 'target.edit', name, { id, targetName, syncStart: isSync });
+        res.json({ ok: true, resp });
+    } catch (e) {
+        res.status(502).json({ ok: false, error: e.message });
+    }
+});
+
+// POST /instances/:name/targets/:id/toggle-sync
+app.post('/instances/:name/targets/:id/toggle-sync', async (req, res) => {
+    const { name, id } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    try {
+        const getResp = await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, 'GetStatus');
+        const target = (getResp.targets || []).find((t) => String(t.id) === String(id));
+        if (!target) return res.status(404).json({ ok: false, error: 'Target no encontrado' });
+
+        const currentSync = Boolean(target['sync-start'] ?? target.syncStart);
+        const newSync = !currentSync;
+        const streamKey = target.rtmp || target.key || '';
+
+        await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, 'EditTarget', {
+            id: target.id,
+            name: target.name,
+            protocol: target.protocol || 'RTMP',
+            url: target.url,
+            key: streamKey,
+            rtmp: streamKey,
+            'sync-start': newSync,
+            'sync-stop': newSync
+        });
+        logAudit(req, 'target.toggle_sync', name, { id, syncStart: newSync });
+        res.json({ ok: true, syncStart: newSync });
+    } catch (e) {
+        res.status(502).json({ ok: false, error: e.message });
+    }
+});
+
+// POST /instances/:name/targets/:id/toggle-stream
+app.post('/instances/:name/targets/:id/toggle-stream', async (req, res) => {
+    const { name, id } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    try {
+        const getResp = await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, 'GetStatus');
+        const target = (getResp.targets || []).find((t) => String(t.id) === String(id));
+        if (!target) return res.status(404).json({ ok: false, error: 'Target no encontrado' });
+
+        const isStreaming = target.status === 'active' || target.status === 'live' || target.status === 'streaming';
+        const cmd = isStreaming ? 'Stop' : 'Start';
+        const resp = await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, cmd, { id: target.id });
+        logAudit(req, 'target.toggle_stream', name, { id, action: cmd });
+        res.json({ ok: true, action: cmd, resp });
+    } catch (e) {
+        res.status(502).json({ ok: false, error: e.message });
+    }
+});
+
+// DELETE /instances/:name/targets/:id
+app.delete('/instances/:name/targets/:id', async (req, res) => {
+    const { name, id } = req.params;
+    if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
+    const instance = readInstanceRecord(name);
+    if (!instance) return res.status(404).json({ ok: false, error: 'not found' });
+
+    try {
+        const resp = await callPluginWs(instance.pluginWsPort, instance.pluginWsPassword, 'DeleteTarget', { id });
+        logAudit(req, 'target.delete', name, { id });
+        res.json({ ok: true, resp });
+    } catch (e) {
+        res.status(502).json({ ok: false, error: e.message });
+    }
+});
+
 app.delete('/instances/:name', async (req, res) => {
     const { name } = req.params;
     if (!validName(name)) return res.status(400).json({ ok: false, error: 'invalid name' });
