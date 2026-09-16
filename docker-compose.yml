@@ -1,0 +1,28 @@
+services:
+  voiceforge-f5:
+    build: .
+    image: voiceforge-f5:latest
+    container_name: voiceforge-f5
+    restart: unless-stopped
+    ports:
+      - "29783:29783"
+    environment:
+      - PORT=29783
+    volumes:
+      # Persistencia de voces cargadas
+      - ./voices:/app/voices
+      # Persistencia de audios generados
+      - ./outputs:/app/outputs
+      # Caché persistente de modelos para no volver a descargarlos
+      - hf_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf_cache:
+    name: voiceforge_hf_cache

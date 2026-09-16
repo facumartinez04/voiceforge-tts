@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoiceForge AI - Zero-Shot Voice Cloning & TTS</title>
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#312e81',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    /* Estilos personalizados para scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .glow-effect {
+      box-shadow: 0 0 40px -10px rgba(99, 102, 241, 0.25);
+    }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+
+  <!-- Header / Barra de Navegación -->
+  <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+            VoiceForge AI
+          </h1>
+          <p class="text-xs text-slate-400 font-medium">XTTS-v2 Zero-Shot Voice Cloning</p>
+        </div>
+      </div>
+
+      <!-- Badge de Estado del Sistema -->
+      <div id="system-status-badge" class="flex items-center space-x-2 text-xs bg-slate-800/80 border border-slate-700/70 px-3 py-1.5 rounded-full text-slate-300">
+        <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping mr-1"></span>
+        <span id="status-text">Conectando...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Contenedor Principal -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      
+      <!-- Columna Izquierda: Parámetros y Voz (7 columnas en escritorio) -->
+      <div class="lg:col-span-7 space-y-6">
+        
+        <!-- Tarjeta: Selección de Voz de Referencia -->
+        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 glow-effect">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center space-x-2">
+              <span class="flex items-center justify-center w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 text-xs font-bold">1</span>
+              <h2 class="text-base font-semibold text-slate-200">Voz de Referencia (Speaker)</h2>
+            </div>
+            <span class="text-xs text-slate-400">Audio limpio de 3 a 10s</span>
+          </div>
+
+          <!-- Selector de Modo de Voz (Biblioteca vs Subir archivo) -->
+          <div class="flex p-1 bg-slate-950/80 rounded-xl border border-slate-800 mb-5">
+            <button type="button" id="tab-saved" class="flex-1 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white transition-all duration-200 flex items-center justify-center space-x-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              <span>Voces Guardadas</span>
+            </button>
+            <button type="button" id="tab-upload" class="flex-1 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition-all duration-200 flex items-center justify-center space-x-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              <span>Subir Muestra Nueva</span>
+            </button>
+          </div>
+
+          <!-- Contenido: Voces Guardadas -->
+          <div id="content-saved" class="space-y-4">
+            <div class="flex items-center space-x-2">
+              <div class="relative flex-1">
+                <select id="voice-select" class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none pr-10">
+                  <option value="" disabled selected>Cargando voces disponibles...</option>
+                </select>
+                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+              <button id="btn-refresh-voices" title="Actualizar lista de voces" class="p-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- Mini reproductor de previsualización para la voz seleccionada -->
+            <div id="ref-audio-preview" class="hidden p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
+              <div class="flex items-center space-x-2 text-xs text-slate-400 truncate">
+                <svg class="w-4 h-4 text-indigo-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/>
+                </svg>
+                <span id="ref-audio-name" class="font-medium text-slate-300 truncate"></span>
+              </div>
+              <audio id="ref-audio-player" controls class="h-8 max-w-[200px]"></audio>
+            </div>
+
+            <p class="text-xs text-slate-500">
+              💡 Puedes agregar más archivos <code class="text-indigo-300 font-mono">.wav</code> directamente en la carpeta <code class="text-indigo-300 font-mono">voices/</code> de tu proyecto.
+            </p>
+          </div>
+
+          <!-- Contenido: Subir Muestra Nueva (Drag & Drop) -->
+          <div id="content-upload" class="hidden space-y-4">
+            <div id="drop-zone" class="border-2 border-dashed border-slate-700 hover:border-indigo-500/70 bg-slate-950/50 hover:bg-indigo-950/10 rounded-xl p-6 text-center cursor-pointer transition-all">
+              <input type="file" id="file-input" accept="audio/wav,audio/mp3,audio/ogg,audio/flac,audio/x-wav" class="hidden" />
+              <div class="flex flex-col items-center justify-center space-y-2">
+                <div class="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-indigo-400 mb-1">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                <p class="text-sm font-medium text-slate-200">
+                  Arrastra tu muestra de audio aquí o <span class="text-indigo-400 underline">explora</span>
+                </p>
+                <p class="text-xs text-slate-400">Soporta WAV, MP3, OGG (Duración recomendada: 3 - 10 seg)</p>
+              </div>
+            </div>
+
+            <!-- Preview del archivo cargado -->
+            <div id="upload-preview" class="hidden p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between">
+              <div class="flex items-center space-x-3 overflow-hidden">
+                <span class="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/>
+                  </svg>
+                </span>
+                <div class="truncate">
+                  <p id="upload-file-name" class="text-xs font-semibold text-slate-200 truncate"></p>
+                  <p id="upload-file-size" class="text-[11px] text-slate-400"></p>
+                </div>
+              </div>
+              <button id="btn-remove-upload" class="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- Nombre opcional y botón directo de guardado -->
+            <div class="space-y-2 pt-2 border-t border-slate-800/80">
+              <label for="custom-voice-name" class="text-xs text-slate-400 font-medium flex items-center justify-between">
+                <span>Nombre de la voz (opcional):</span>
+                <span class="text-[11px] text-slate-500">Ej: Mi Voz, Locutor, Maria</span>
+              </label>
+              <input type="text" id="custom-voice-name" placeholder="Escribe un nombre para identificar esta voz..." class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
+            </div>
+
+            <div class="flex items-center justify-between pt-1">
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="check-save-voice" checked class="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900 w-4 h-4 cursor-pointer" />
+                <label for="check-save-voice" class="text-xs text-slate-300 cursor-pointer select-none">
+                  Guardar al sintetizar (<code class="text-indigo-300 font-mono text-[11px]">voices/</code>)
+                </label>
+              </div>
+              <button type="button" id="btn-save-voice-direct" class="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-md shadow-indigo-600/30 transition flex items-center space-x-1.5 cursor-pointer">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                <span>Guardar Voz Ahora</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tarjeta: Configuración de Texto e Idioma -->
+        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 glow-effect space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="flex items-center justify-center w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 text-xs font-bold">2</span>
+              <h2 class="text-base font-semibold text-slate-200">Motor y Texto</h2>
+            </div>
+            
+            <!-- Selector de Idioma / Voz Neural -->
+            <div id="lang-container" class="flex items-center space-x-2">
+              <label for="lang-select" class="text-xs text-slate-400 font-medium">Voz/Idioma:</label>
+              <select id="lang-select" class="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500">
+                <option value="es" selected>🇦🇷 Español (Argentina / Tomás)</option>
+                <option value="mx">🇲🇽 Español (México / Jorge)</option>
+                <option value="es-es">🇪🇸 Español (España / Álvaro)</option>
+                <option value="elena">🇦🇷 Español (Argentina / Elena)</option>
+                <option value="en">🇺🇸 English</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Selector de Motor (Qwen3-TTS vs XTTS-v2 vs Edge-TTS vs F5-TTS) -->
+          <div class="p-3 bg-slate-950/80 border border-slate-800/90 rounded-xl space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-300">Motor de Síntesis:</span>
+              <span id="engine-badge" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">⚡ Qwen3-TTS 0.6B Español SOTA</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button type="button" id="engine-btn-qwen-06" class="py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center space-x-1 transition bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/20">
+                <span>⚡ Qwen 0.6B (Rápido)</span>
+              </button>
+              <button type="button" id="engine-btn-qwen-17" class="py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center space-x-1 transition bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200">
+                <span>🔥 Qwen 1.7B (Pro)</span>
+              </button>
+              <button type="button" id="engine-btn-xtts" class="py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center space-x-1 transition bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200">
+                <span>🎙️ Coqui XTTS-v2</span>
+              </button>
+              <button type="button" id="engine-btn-edge" class="py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center space-x-1 transition bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200">
+                <span>👑 Microsoft Neural</span>
+              </button>
+            </div>
+            <!-- Transcripción opcional de la muestra de referencia -->
+            <div id="f5-ref-container" class="pt-1">
+              <input type="text" id="f5-ref-text" placeholder="Transcripción de la muestra de audio (opcional, aumenta la fidelidad)..." class="w-full bg-slate-900/90 border border-slate-700/60 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+            </div>
+          </div>
+
+          <!-- Textarea con contador -->
+          <div class="space-y-2">
+            <textarea id="tts-text" rows="4" maxlength="500" placeholder="Escribe o pega aquí el texto que deseas que la voz clonada reproduzca con entonación y estilo natural..." class="w-full bg-slate-950 border border-slate-700/80 rounded-xl p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none transition leading-relaxed"></textarea>
+            
+            <div class="flex items-center justify-between text-xs text-slate-500 px-1">
+              <div class="flex space-x-2">
+                <span>Ejemplos rápidos:</span>
+                <button type="button" class="btn-sample text-indigo-400 hover:text-indigo-300 underline" data-text="¡Hola a todos! Este es un mensaje generado automáticamente mediante clonación de voz con inteligencia artificial.">Español</button>
+                <span>•</span>
+                <button type="button" class="btn-sample text-indigo-400 hover:text-indigo-300 underline" data-text="Hello there! Welcome to the future of neural voice synthesis running completely locally.">English</button>
+              </div>
+              <span id="char-counter">0 / 500</span>
+            </div>
+          </div>
+
+          <!-- Botón de Generación -->
+          <button id="btn-generate" type="button" class="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 font-semibold text-sm text-white shadow-lg shadow-indigo-600/30 active:scale-[0.99] transition duration-200 flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg id="btn-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span id="btn-text">Sintetizar & Clonar Voz</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Columna Derecha: Salida, Reproductor e Historial (5 columnas) -->
+      <div class="lg:col-span-5 space-y-6">
+        
+        <!-- Tarjeta de Resultado / Reproductor -->
+        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 glow-effect flex flex-col justify-between min-h-[340px]">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center space-x-2">
+                <span class="flex items-center justify-center w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 text-xs font-bold">3</span>
+                <h2 class="text-base font-semibold text-slate-200">Resultado Generado</h2>
+              </div>
+              <span id="audio-device-tag" class="hidden text-[11px] font-mono uppercase bg-slate-800 border border-slate-700 px-2 py-0.5 rounded text-indigo-300"></span>
+            </div>
+
+            <!-- Estado de Espera / Placeholder -->
+            <div id="result-idle" class="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-3">
+              <div class="w-16 h-16 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-600">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                </svg>
+              </div>
+              <p class="text-sm font-medium text-slate-400">El audio generado aparecerá aquí</p>
+              <p class="text-xs text-slate-600 max-w-xs">Configura la voz, escribe el texto y haz clic en Sintetizar.</p>
+            </div>
+
+            <!-- Estado Cargando / Spinner -->
+            <div id="result-loading" class="hidden flex flex-col items-center justify-center py-12 text-center space-y-4">
+              <div class="relative w-16 h-16">
+                <div class="w-16 h-16 rounded-full border-4 border-slate-800 border-t-indigo-500 animate-spin"></div>
+                <div class="absolute inset-0 flex items-center justify-center text-indigo-400">
+                  <svg class="w-6 h-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z" />
+                  </svg>
+                </div>
+              </div>
+              <div>
+                <p class="text-sm font-semibold text-slate-200">Clonando y generando audio...</p>
+                <p id="loading-timer" class="text-xs text-indigo-400 font-mono mt-1">Tiempo: 0.0s</p>
+                <p class="text-[11px] text-slate-500 mt-2">La primera generación puede tomar unos segundos extras mientras el modelo se ajusta.</p>
+              </div>
+            </div>
+
+            <!-- Estado de Éxito / Audio Listo -->
+            <div id="result-ready" class="hidden space-y-5">
+              <div class="p-4 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-slate-400">Audio WAV sintetizado:</span>
+                  <span id="gen-inference-time" class="text-emerald-400 font-mono font-medium"></span>
+                </div>
+                
+                <!-- Reproductor de Audio HTML5 -->
+                <audio id="main-audio-player" controls class="w-full h-11 rounded-lg"></audio>
+              </div>
+
+              <div class="flex space-x-3">
+                <a id="btn-download" href="#" download="speech_cloned.wav" class="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 flex items-center justify-center space-x-2 transition">
+                  <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span>Descargar WAV</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Caja de Notificación de Errores -->
+          <div id="error-box" class="hidden mt-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-400 flex items-start space-x-2">
+            <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span id="error-message"></span>
+          </div>
+        </div>
+
+        <!-- Historial de la Sesión -->
+        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 glow-effect">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-300 flex items-center space-x-2">
+              <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>Generaciones Recientes</span>
+            </h3>
+            <span id="history-count" class="text-xs text-slate-500">0</span>
+          </div>
+
+          <div id="history-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+            <p id="history-empty" class="text-xs text-slate-500 text-center py-4">No hay audios generados aún en esta sesión.</p>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/60 bg-slate-950 py-4 text-center text-xs text-slate-600">
+    <p>VoiceForge AI • Potenciado por Coqui XTTS-v2 & FastAPI • 100% Local y Gratuito</p>
+  </footer>
+
+  <!-- Lógica JavaScript Vanilla -->
+  <script>
+    // Variables de estado
+    let currentMode = 'saved'; // 'saved' | 'upload'
+    let currentEngine = 'qwen-0.6b'; // 'qwen-0.6b' | 'qwen-1.7b' | 'xtts' | 'edge'
+    let selectedFile = null;
+    let timerInterval = null;
+    let startTime = 0;
+    const history = [];
+
+    // Referencias DOM
+    const engineBtnQwen06 = document.getElementById('engine-btn-qwen-06');
+    const engineBtnQwen17 = document.getElementById('engine-btn-qwen-17');
+    const engineBtnXtts = document.getElementById('engine-btn-xtts');
+    const engineBtnEdge = document.getElementById('engine-btn-edge');
+    const engineBadge = document.getElementById('engine-badge');
+    const f5RefContainer = document.getElementById('f5-ref-container');
+    const f5RefText = document.getElementById('f5-ref-text');
+
+    const tabSaved = document.getElementById('tab-saved');
+    const tabUpload = document.getElementById('tab-upload');
+    const contentSaved = document.getElementById('content-saved');
+    const contentUpload = document.getElementById('content-upload');
+    const voiceSelect = document.getElementById('voice-select');
+    const btnRefreshVoices = document.getElementById('btn-refresh-voices');
+    const refAudioPreview = document.getElementById('ref-audio-preview');
+    const refAudioPlayer = document.getElementById('ref-audio-player');
+    const refAudioName = document.getElementById('ref-audio-name');
+
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const uploadPreview = document.getElementById('upload-preview');
+    const uploadFileName = document.getElementById('upload-file-name');
+    const uploadFileSize = document.getElementById('upload-file-size');
+    const btnRemoveUpload = document.getElementById('btn-remove-upload');
+    const checkSaveVoice = document.getElementById('check-save-voice');
+    const customVoiceName = document.getElementById('custom-voice-name');
+    const btnSaveVoiceDirect = document.getElementById('btn-save-voice-direct');
+
+    const ttsText = document.getElementById('tts-text');
+    const charCounter = document.getElementById('char-counter');
+    const langSelect = document.getElementById('lang-select');
+    const btnGenerate = document.getElementById('btn-generate');
+    const btnText = document.getElementById('btn-text');
+
+    const resultIdle = document.getElementById('result-idle');
+    const resultLoading = document.getElementById('result-loading');
+    const resultReady = document.getElementById('result-ready');
+    const loadingTimer = document.getElementById('loading-timer');
+    const mainAudioPlayer = document.getElementById('main-audio-player');
+    const btnDownload = document.getElementById('btn-download');
+    const genInferenceTime = document.getElementById('gen-inference-time');
+    const audioDeviceTag = document.getElementById('audio-device-tag');
+    const errorBox = document.getElementById('error-box');
+    const errorMessage = document.getElementById('error-message');
+
+    const statusText = document.getElementById('status-text');
+    const historyList = document.getElementById('history-list');
+    const historyEmpty = document.getElementById('history-empty');
+    const historyCount = document.getElementById('history-count');
+
+    // -------------------------------------------------------------
+    // Comprobación de Salud y Hardware
+    // -------------------------------------------------------------
+    async function checkHealth() {
+      try {
+        const res = await fetch('/api/health');
+        if (!res.ok) throw new Error('Error de conexión');
+        const data = await res.json();
+        
+        const badge = document.getElementById('system-status-badge');
+        const isCuda = data.gpu_available;
+        const deviceText = isCuda ? `GPU: ${data.gpu_name || 'CUDA'}` : 'CPU Mode';
+        
+        badge.innerHTML = `
+          <span class="w-2.5 h-2.5 rounded-full ${isCuda ? 'bg-emerald-400' : 'bg-cyan-400'} mr-1"></span>
+          <span>${deviceText}</span>
+          <span class="text-slate-500">•</span>
+          <span class="${data.model_loaded ? 'text-emerald-400' : 'text-amber-400'}">${data.model_loaded ? 'Modelo Listo' : 'En espera'}</span>
+        `;
+      } catch (err) {
+        statusText.textContent = 'Servidor Desconectado';
+        statusText.className = 'text-rose-400';
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Gestión de Voces Guardadas
+    // -------------------------------------------------------------
+    async function loadVoices() {
+      try {
+        voiceSelect.innerHTML = '<option value="" disabled selected>Cargando voces...</option>';
+        const res = await fetch('/api/voices');
+        const data = await res.json();
+        
+        voiceSelect.innerHTML = '';
+        if (!data.voices || data.voices.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.disabled = true;
+          opt.selected = true;
+          opt.textContent = 'No hay voces en voices/. Sube una muestra.';
+          voiceSelect.appendChild(opt);
+          refAudioPreview.classList.add('hidden');
+          return;
+        }
+
+        data.voices.forEach((v, idx) => {
+          const opt = document.createElement('option');
+          opt.value = v.filename;
+          opt.textContent = `${v.name} (${v.size_kb} KB)`;
+          if (idx === 0) opt.selected = true;
+          voiceSelect.appendChild(opt);
+        });
+
+        // Actualizar preview de la primera voz
+        updateVoicePreview();
+      } catch (err) {
+        voiceSelect.innerHTML = '<option value="" disabled selected>Error al cargar voces</option>';
+      }
+    }
+
+    function updateVoicePreview() {
+      const selected = voiceSelect.value;
+      if (selected) {
+        refAudioName.textContent = selected;
+        refAudioPlayer.src = `/api/voices/${encodeURIComponent(selected)}`;
+        refAudioPreview.classList.remove('hidden');
+      } else {
+        refAudioPreview.classList.add('hidden');
+      }
+    }
+
+    voiceSelect.addEventListener('change', updateVoicePreview);
+    btnRefreshVoices.addEventListener('click', loadVoices);
+
+    // -------------------------------------------------------------
+    // Cambio de Motor (Qwen 0.6B vs Qwen 1.7B vs XTTS-v2 vs Edge-TTS)
+    // -------------------------------------------------------------
+    function updateEngineUI(engine) {
+      currentEngine = engine;
+      const activeClass = 'py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center space-x-1 transition bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/20';
+      const inactiveClass = 'py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center space-x-1 transition bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200';
+
+      engineBtnQwen06.className = engine === 'qwen-0.6b' ? activeClass : inactiveClass;
+      engineBtnQwen17.className = engine === 'qwen-1.7b' ? activeClass : inactiveClass;
+      engineBtnXtts.className = engine === 'xtts' ? activeClass : inactiveClass;
+      engineBtnEdge.className = engine === 'edge' ? activeClass : inactiveClass;
+
+      if (engine === 'qwen-0.6b') {
+        engineBadge.textContent = '⚡ Qwen3-TTS 0.6B Ultrarrápido';
+        engineBadge.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+        f5RefContainer.classList.remove('hidden');
+        f5RefText.placeholder = "Transcripción de la muestra de audio (opcional)...";
+      } else if (engine === 'qwen-1.7b') {
+        engineBadge.textContent = '🔥 Qwen3-TTS 1.7B Calidad Pro';
+        engineBadge.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 border border-pink-500/30';
+        f5RefContainer.classList.remove('hidden');
+        f5RefText.placeholder = "Transcripción de la muestra de audio (opcional, aumenta la fidelidad)...";
+      } else if (engine === 'xtts') {
+        engineBadge.textContent = '🎙️ Coqui XTTS-v2';
+        engineBadge.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
+        f5RefContainer.classList.add('hidden');
+      } else if (engine === 'edge') {
+        engineBadge.textContent = '👑 Microsoft Neural 10/10';
+        engineBadge.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30';
+        f5RefContainer.classList.add('hidden');
+      }
+    }
+
+    engineBtnQwen06.addEventListener('click', () => updateEngineUI('qwen-0.6b'));
+    engineBtnQwen17.addEventListener('click', () => updateEngineUI('qwen-1.7b'));
+    engineBtnXtts.addEventListener('click', () => updateEngineUI('xtts'));
+    engineBtnEdge.addEventListener('click', () => updateEngineUI('edge'));
+
+    // -------------------------------------------------------------
+    // Cambio de Pestañas (Modo de Voz)
+    // -------------------------------------------------------------
+    tabSaved.addEventListener('click', () => {
+      currentMode = 'saved';
+      tabSaved.className = 'flex-1 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white transition-all flex items-center justify-center space-x-2';
+      tabUpload.className = 'flex-1 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition-all flex items-center justify-center space-x-2';
+      contentSaved.classList.remove('hidden');
+      contentUpload.classList.add('hidden');
+    });
+
+    tabUpload.addEventListener('click', () => {
+      currentMode = 'upload';
+      tabUpload.className = 'flex-1 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white transition-all flex items-center justify-center space-x-2';
+      tabSaved.className = 'flex-1 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition-all flex items-center justify-center space-x-2';
+      contentUpload.classList.remove('hidden');
+      contentSaved.classList.add('hidden');
+    });
+
+    // -------------------------------------------------------------
+    // Drag & Drop y Archivo de Muestra
+    // -------------------------------------------------------------
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('border-indigo-500', 'bg-indigo-950/20');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('border-indigo-500', 'bg-indigo-950/20');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-indigo-500', 'bg-indigo-950/20');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFileSelect(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files && fileInput.files[0]) {
+        handleFileSelect(fileInput.files[0]);
+      }
+    });
+
+    function handleFileSelect(file) {
+      selectedFile = file;
+      uploadFileName.textContent = file.name;
+      uploadFileSize.textContent = `${(file.size / 1024).toFixed(1)} KB`;
+      uploadPreview.classList.remove('hidden');
+      dropZone.classList.add('hidden');
+    }
+
+    btnRemoveUpload.addEventListener('click', () => {
+      selectedFile = null;
+      fileInput.value = '';
+      uploadPreview.classList.add('hidden');
+      dropZone.classList.remove('hidden');
+    });
+
+    btnSaveVoiceDirect.addEventListener('click', async () => {
+      hideError();
+      if (!selectedFile) {
+        showError('Por favor selecciona o arrastra primero un archivo de audio para guardar.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      const customName = customVoiceName.value.trim();
+      if (customName) {
+        formData.append('custom_name', customName);
+      }
+
+      try {
+        btnSaveVoiceDirect.disabled = true;
+        btnSaveVoiceDirect.innerHTML = `
+          <svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Guardando...</span>
+        `;
+
+        const res = await fetch('/api/voices/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ detail: 'Error al subir voz' }));
+          throw new Error(errData.detail || 'Fallo al guardar');
+        }
+
+        const data = await res.json();
+        await loadVoices();
+
+        // Seleccionar la voz recién guardada
+        if (data.filename) {
+          voiceSelect.value = data.filename;
+          updateVoicePreview();
+        }
+
+        // Cambiar a la pestaña de voces guardadas
+        tabSaved.click();
+
+      } catch (err) {
+        showError(err.message || 'Error al guardar la voz en la biblioteca.');
+      } finally {
+        btnSaveVoiceDirect.disabled = false;
+        btnSaveVoiceDirect.innerHTML = `
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+          </svg>
+          <span>Guardar Voz Ahora</span>
+        `;
+      }
+    });
+
+    // -------------------------------------------------------------
+    // Manejo de Texto y Contador
+    // -------------------------------------------------------------
+    ttsText.addEventListener('input', () => {
+      charCounter.textContent = `${ttsText.value.length} / 500`;
+    });
+
+    document.querySelectorAll('.btn-sample').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ttsText.value = btn.getAttribute('data-text');
+        charCounter.textContent = `${ttsText.value.length} / 500`;
+      });
+    });
+
+    // -------------------------------------------------------------
+    // Generación / Síntesis TTS
+    // -------------------------------------------------------------
+    btnGenerate.addEventListener('click', async () => {
+      hideError();
+      const text = ttsText.value.trim();
+      const lang = langSelect.value;
+
+      if (!text) {
+        showError('Por favor, ingresa el texto que deseas sintetizar.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('text', text);
+      formData.append('engine', currentEngine);
+      formData.append('language', lang);
+      formData.append('ref_text', f5RefText ? f5RefText.value.trim() : '');
+
+      if (currentMode === 'saved') {
+        const voice = voiceSelect.value;
+        if (!voice) {
+          showError('Debes seleccionar una voz de referencia de la lista o subir un archivo.');
+          return;
+        }
+        formData.append('voice_name', voice);
+      } else {
+        if (!selectedFile) {
+          showError('Por favor, selecciona o arrastra un archivo de audio para clonar la voz.');
+          return;
+        }
+        formData.append('voice_file', selectedFile);
+        formData.append('save_voice', checkSaveVoice.checked ? 'true' : 'false');
+        if (customVoiceName.value.trim()) {
+          formData.append('custom_voice_name', customVoiceName.value.trim());
+        }
+      }
+
+      setLoading(true);
+
+      try {
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({ detail: 'Error en la petición' }));
+          throw new Error(errData.detail || 'Fallo en la generación');
+        }
+
+        const blob = await response.blob();
+        const audioUrl = URL.createObjectURL(blob);
+        const inferenceTime = response.headers.get('X-Inference-Time') || 'OK';
+        const deviceUsed = response.headers.get('X-Device') || 'CUDA';
+        const engineUsed = response.headers.get('X-Engine') || 'F5-TTS';
+
+        // Mostrar reproductor
+        mainAudioPlayer.src = audioUrl;
+        btnDownload.href = audioUrl;
+        btnDownload.download = `voice_cloned_${Date.now()}.wav`;
+        genInferenceTime.textContent = `Inferencia: ${inferenceTime}`;
+
+        if (deviceUsed) {
+          audioDeviceTag.textContent = `${engineUsed} • ${deviceUsed}`;
+          audioDeviceTag.classList.remove('hidden');
+        }
+
+        resultIdle.classList.add('hidden');
+        resultLoading.classList.add('hidden');
+        resultReady.classList.remove('hidden');
+
+        // Reproducir automáticamente
+        mainAudioPlayer.play().catch(() => {});
+
+        // Agregar al historial
+        addToHistory({
+          text: text.slice(0, 45) + (text.length > 45 ? '...' : ''),
+          audioUrl: audioUrl,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          lang: lang.toUpperCase(),
+          inference: inferenceTime
+        });
+
+        // Si se guardó la voz, refrescar la lista
+        if (currentMode === 'upload' && checkSaveVoice.checked) {
+          loadVoices();
+        }
+
+      } catch (err) {
+        showError(err.message || 'Error inesperado durante la generación.');
+        resultIdle.classList.remove('hidden');
+        resultLoading.classList.add('hidden');
+      } finally {
+        setLoading(false);
+        checkHealth();
+      }
+    });
+
+    function setLoading(isLoading) {
+      btnGenerate.disabled = isLoading;
+      if (isLoading) {
+        btnText.textContent = 'Procesando Síntesis...';
+        resultIdle.classList.add('hidden');
+        resultReady.classList.add('hidden');
+        resultLoading.classList.remove('hidden');
+        
+        startTime = Date.now();
+        loadingTimer.textContent = 'Tiempo: 0.0s';
+        timerInterval = setInterval(() => {
+          const sec = ((Date.now() - startTime) / 1000).toFixed(1);
+          loadingTimer.textContent = `Tiempo: ${sec}s`;
+        }, 100);
+      } else {
+        btnText.textContent = 'Sintetizar & Clonar Voz';
+        clearInterval(timerInterval);
+      }
+    }
+
+    function showError(msg) {
+      errorMessage.textContent = msg;
+      errorBox.classList.remove('hidden');
+    }
+
+    function hideError() {
+      errorBox.classList.add('hidden');
+    }
+
+    function addToHistory(item) {
+      history.unshift(item);
+      historyCount.textContent = history.length;
+      if (historyEmpty) historyEmpty.remove();
+
+      const el = document.createElement('div');
+      el.className = 'p-3 bg-slate-950/80 border border-slate-800 rounded-xl flex items-center justify-between space-x-3 text-xs';
+      el.innerHTML = `
+        <div class="truncate flex-1">
+          <p class="font-medium text-slate-300 truncate">"${item.text}"</p>
+          <div class="flex space-x-2 text-[11px] text-slate-500 mt-0.5">
+            <span>${item.time}</span>
+            <span>•</span>
+            <span class="text-indigo-400 font-mono">${item.lang}</span>
+            <span>•</span>
+            <span>${item.inference}</span>
+          </div>
+        </div>
+        <div class="flex items-center space-x-1 shrink-0">
+          <button class="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition" onclick="new Audio('${item.audioUrl}').play()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+            </svg>
+          </button>
+          <a href="${item.audioUrl}" download="speech_${Date.now()}.wav" class="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </a>
+        </div>
+      `;
+      historyList.prepend(el);
+    }
+
+    // Inicialización al cargar la página
+    window.addEventListener('DOMContentLoaded', () => {
+      checkHealth();
+      loadVoices();
+    });
+  </script>
+</body>
+</html>

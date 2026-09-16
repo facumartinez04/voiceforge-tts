@@ -1,0 +1,169 @@
+"""
+Mini API para Coolify - Controla instancias Vast.ai on-demand.
+Endpoints:
+  POST /tts/start   -> Prende GPU en Vast.ai
+  POST /tts/stop    -> Apaga GPU (deja de cobrar)
+  GET  /tts/status  -> Estado actual
+"""
+
+import os
+import json
+import time
+import requests
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="VoiceForge Vast.ai Controller")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+API_KEY = os.environ.get("VASTAI_API_KEY", "")
+DOCKER_IMAGE = os.environ.get("DOCKER_IMAGE", "")
+CF_TUNNEL_TOKEN = os.environ.get("CLOUDFLARE_TUNNEL_TOKEN", "")
+CONTROL_SECRET = os.environ.get("CONTROL_SECRET", "changeme")
+
+BASE_URL = "https://console.vast.ai/api/v0"
+
+current_instance_id = None
+
+
+def vast_headers():
+    return {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+
+
+def verify_secret(secret: str):
+    if secret != CONTROL_SECRET:
+        raise HTTPException(status_code=403, detail="Secret invalido")
+
+
+@app.get("/tts/status")
+async def tts_status(secret: str = ""):
+    verify_secret(secret)
+    global current_instance_id
+
+    if not current_instance_id:
+        return {"status": "off", "instance_id": None, "url": None, "cost_per_hour": 0}
+
+    r = requests.get(f"{BASE_URL}/instances/{current_instance_id}/", headers=vast_headers())
+    if r.status_code != 200:
+        current_instance_id = None
+        return {"status": "off", "instance_id": None, "url": None, "cost_per_hour": 0}
+
+    data = r.json()
+    inst = data.get("instances", data)
+    if isinstance(inst, list):
+        inst = inst[0] if inst else {}
+
+    actual = inst.get("actual_status", "unknown")
+    public_ip = inst.get("public_ipaddr", "")
+    ports = inst.get("ports", {})
+    app_port = ""
+    for k, v in ports.items():
+        if "29783" in k and v:
+            app_port = v[0].get("HostPort", "")
+
+    url = f"http://{public_ip}:{app_port}" if public_ip and app_port else None
+
+    return {
+        "status": actual,
+        "instance_id": current_instance_id,
+        "url": url,
+        "gpu": inst.get("gpu_name", ""),
+        "cost_per_hour": round(inst.get("dph_total", 0), 3),
+    }
+
+
+@app.post("/tts/start")
+async def tts_start(secret: str = ""):
+    verify_secret(secret)
+    global current_instance_id
+
+    if current_instance_id:
+        st = await tts_status(secret=CONTROL_SECRET)
+        if st["status"] in ("running", "loading"):
+            return {"message": "Ya hay una instancia corriendo", **st}
+        current_instance_id = None
+
+    if not DOCKER_IMAGE:
+        raise HTTPException(status_code=500, detail="Falta DOCKER_IMAGE en env")
+
+    search_params = {
+        "verified": {"eq": True},
+        "rentable": {"eq": True},
+        "gpu_ram": {"gte": 11},
+        "cuda_max_good": {"gte": 12.0},
+        "disk_space": {"gte": 30},
+        "inet_down": {"gte": 100},
+        "reliability2": {"gte": 0.9},
+        "num_gpus": {"eq": 1},
+        "order": [["dph_total", "asc"]],
+        "type": "on-demand",
+    }
+
+    r = requests.get(
+        f"{BASE_URL}/bundles",
+        headers=vast_headers(),
+        params={"q": json.dumps(search_params), "limit": "3"},
+    )
+    r.raise_for_status()
+    offers = r.json().get("offers", [])
+    if not offers:
+        raise HTTPException(status_code=503, detail="No hay GPUs disponibles en Vast.ai")
+
+    best = offers[0]
+
+    env_vars = {"-p 29783:29783": "1", "-e PORT=29783": "1"}
+    if CF_TUNNEL_TOKEN:
+        env_vars[f"-e CLOUDFLARE_TUNNEL_TOKEN={CF_TUNNEL_TOKEN}"] = "1"
+
+    create_body = {
+        "client_id": "me",
+        "image": DOCKER_IMAGE,
+        "disk": 40,
+        "env": env_vars,
+        "args": [],
+        "runtype": "args",
+    }
+
+    r = requests.put(
+        f"{BASE_URL}/asks/{best['id']}/",
+        headers=vast_headers(),
+        json=create_body,
+    )
+    r.raise_for_status()
+    result = r.json()
+    new_contract = result.get("new_contract")
+    if not new_contract:
+        raise HTTPException(status_code=500, detail=f"Error creando instancia: {result}")
+
+    current_instance_id = str(new_contract)
+
+    return {
+        "message": "Instancia creada, arrancando...",
+        "instance_id": current_instance_id,
+        "gpu": best.get("gpu_name", ""),
+        "cost_per_hour": round(best.get("dph_total", 0), 3),
+    }
+
+
+@app.post("/tts/stop")
+async def tts_stop(secret: str = ""):
+    verify_secret(secret)
+    global current_instance_id
+
+    if not current_instance_id:
+        return {"message": "No hay instancia activa"}
+
+    r = requests.delete(f"{BASE_URL}/instances/{current_instance_id}/", headers=vast_headers())
+    old_id = current_instance_id
+    current_instance_id = None
+
+    if r.status_code in (200, 204):
+        return {"message": f"Instancia {old_id} destruida, ya no cobra"}
+    else:
+        return {"message": f"Posible error al destruir {old_id}: {r.status_code}"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("CONTROL_PORT", 29784))
+    uvicorn.run("app:app", host="0.0.0.0", port=port)

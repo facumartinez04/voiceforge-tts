@@ -1,0 +1,44 @@
+FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PORT=29783 \
+    HF_HOME=/workspace/hf_cache \
+    COQUI_TOS_AGREED=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    git \
+    build-essential \
+    curl \
+    wget \
+    openssh-server \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/run/sshd \
+    && echo 'root:vastai' | chpasswd \
+    && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+# Instalar cloudflared para tunnel con dominio custom
+RUN wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
+    && dpkg -i cloudflared-linux-amd64.deb \
+    && rm cloudflared-linux-amd64.deb
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir edge-tts
+
+COPY . .
+
+RUN mkdir -p voices outputs templates /workspace/hf_cache
+
+COPY vastai_start.sh /start.sh
+RUN chmod +x /start.sh
+
+EXPOSE 29783 22
+
+CMD ["/start.sh"]

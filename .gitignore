@@ -1,0 +1,22 @@
+# Python
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+# Modelos y caches
+.cache/
+torch_cache/
+
+# Audios temporales generados
+outputs/*.wav
+!outputs/.gitkeep
+
+# Vast.ai
+.env.vastai
+.vastai_instance_id
+
+# IDEs
+.vscode/
+.idea/

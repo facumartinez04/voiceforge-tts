@@ -1,0 +1,15 @@
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.vscode/
+.idea/
+outputs/*.wav
+*.md
+deploy.sh
+docker-compose.yml
+Dockerfile
+.dockerignore
