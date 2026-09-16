@@ -1,0 +1,13 @@
+services:
+  vastai-controller:
+    build: .
+    container_name: vastai-controller
+    restart: unless-stopped
+    ports:
+      - "29784:29784"
+    environment:
+      - VASTAI_API_KEY=${VASTAI_API_KEY}
+      - DOCKER_IMAGE=${DOCKER_IMAGE:-mahada01/voiceforge-tts:latest}
+      - CONTROL_SECRET=${CONTROL_SECRET:-changeme}
+      - CONTROL_PORT=29784
+      - CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
