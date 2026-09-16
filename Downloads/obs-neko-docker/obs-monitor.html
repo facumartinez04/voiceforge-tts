@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IRLCONTROL — Master OBS Monitor en Tiempo Real</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <style>
+    :root {
+      --bg-dark: #090b10;
+      --bg-card: #121620;
+      --bg-card-hover: #181e2c;
+      --bg-surface: #1a2133;
+      --border: #232b3e;
+      --border-glow: #384666;
+      
+      --text-main: #f1f5f9;
+      --text-muted: #8e9bb0;
+      --text-dim: #5c6880;
+
+      --accent-red: #ef4444;
+      --accent-red-glow: rgba(239, 68, 68, 0.35);
+      --accent-green: #10b981;
+      --accent-green-glow: rgba(16, 185, 129, 0.35);
+      --accent-amber: #f59e0b;
+      --accent-amber-glow: rgba(245, 158, 11, 0.35);
+      --accent-blue: #3b82f6;
+      --accent-purple: #8b5cf6;
+
+      --danger-gradient: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+      --success-gradient: linear-gradient(135deg, #10b981 0%, #047857 100%);
+      --warning-gradient: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-dark); }
+    ::-webkit-scrollbar-thumb { background: #232c3f; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #34425e; }
+
+    /* Header & Command Bar */
+    header {
+      background: rgba(18, 22, 32, 0.85);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 12px 24px;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-badge {
+      background: var(--danger-gradient);
+      color: #fff;
+      font-weight: 800;
+      font-size: 13px;
+      letter-spacing: 1px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      box-shadow: 0 0 16px var(--accent-red-glow);
+    }
+
+    .brand-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-title span { color: var(--accent-red); }
+
+    .system-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+      animation: pulseAnim 1.6s infinite;
+    }
+
+    .pulse-dot.red {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+    }
+
+    @keyframes pulseAnim {
+      0% { transform: scale(0.9); opacity: 0.8; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.9); opacity: 0.8; }
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn-action {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.18s ease;
+    }
+
+    .btn-action:hover {
+      background: #232c40;
+      border-color: var(--border-glow);
+    }
+
+    .btn-action.active {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: var(--accent-blue);
+      color: #60a5fa;
+    }
+
+    .btn-action.demo-btn {
+      background: rgba(139, 92, 246, 0.15);
+      border-color: rgba(139, 92, 246, 0.4);
+      color: #c084fc;
+    }
+
+    .btn-action.demo-btn.active {
+      background: var(--accent-purple);
+      border-color: var(--accent-purple);
+      color: #fff;
+      box-shadow: 0 0 14px rgba(139, 92, 246, 0.5);
+    }
+
+    /* KPI Summary Row */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .kpi-card {
+      background: rgba(26, 33, 51, 0.4);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    .kpi-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .kpi-value.green { color: #34d399; }
+    .kpi-value.red { color: #f87171; }
+    .kpi-value.amber { color: #fbbf24; }
+    .kpi-value.blue { color: #60a5fa; }
+
+    /* Filter & Control Toolbar */
+    .toolbar {
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 14px;
+      background: #0d1017;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .filter-tab {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .filter-tab:hover {
+      color: var(--text-main);
+      border-color: var(--border-glow);
+    }
+
+    .filter-tab.active {
+      background: #1e2638;
+      border-color: var(--accent-blue);
+      color: #fff;
+    }
+
+    .search-box {
+      position: relative;
+    }
+
+    .search-box input {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 12px 7px 32px;
+      color: var(--text-main);
+      font-size: 12.5px;
+      width: 220px;
+      outline: none;
+    }
+
+    .search-box input:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 8px rgba(59, 130, 246, 0.25);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+
+    .view-toggle {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .view-btn {
+      background: var(--bg-card);
+      border: none;
+      color: var(--text-muted);
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .view-btn.active {
+      background: var(--accent-blue);
+      color: #fff;
+    }
+
+    /* Main Container */
+    main {
+      padding: 24px;
+      flex: 1;
+    }
+
+    /* Grid Layout */
+    .obs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(370px, 1fr));
+      gap: 18px;
+    }
+
+    /* OBS Card */
+    .obs-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .obs-card:hover {
+      border-color: var(--border-glow);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+
+    .obs-card.status-critical {
+      border-color: rgba(239, 68, 68, 0.55);
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);
+    }
+
+    .obs-card.status-warning {
+      border-color: rgba(245, 158, 11, 0.5);
+    }
+
+    /* Encoding Overload Top Banner Alert */
+    .overload-alert-banner {
+      background: #7f1d1d;
+      color: #fecaca;
+      padding: 7px 12px;
+      font-size: 11.5px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      animation: alertFlash 1.2s infinite alternate;
+      border-bottom: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    @keyframes alertFlash {
+      0% { background: #7f1d1d; }
+      100% { background: #991b1b; }
+    }
+
+    .card-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(26, 33, 51, 0.25);
+    }
+
+    .instance-info {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .instance-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .instance-alias {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .stream-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stream-pill.live {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .stream-pill.offline {
+      background: rgba(92, 104, 128, 0.15);
+      color: var(--text-muted);
+      border: 1px solid rgba(92, 104, 128, 0.3);
+    }
+
+    .stream-pill.reconnecting {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    /* Card Metrics Body */
+    .card-body {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      flex: 1;
+    }
+
+    /* Core Stream Metrics Highlight */
+    .metrics-highlight-box {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      background: #0c0f16;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .highlight-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .highlight-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .highlight-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .highlight-val.fps-green { color: #34d399; }
+    .highlight-val.fps-amber { color: #fbbf24; }
+    .highlight-val.fps-red { color: #f87171; }
+
+    /* Status Sections */
+    .indicator-strip {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: rgba(26, 33, 51, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 9px 12px;
+    }
+
+    .indicator-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+
+    .indicator-name {
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .indicator-state {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    /* Visual Meter Bar */
+    .meter-container {
+      width: 100%;
+      height: 6px;
+      background: #090c12;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+
+    .meter-bar {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease, background 0.3s ease;
+    }
+
+    .meter-bar.green { background: #10b981; }
+    .meter-bar.amber { background: #f59e0b; }
+    .meter-bar.red { background: #ef4444; }
+
+    /* Scene Switcher & Actions */
+    .scene-selector-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .scene-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .scene-buttons-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+
+    .btn-scene {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      padding: 6px 4px;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: all 0.15s ease;
+    }
+
+    .btn-scene:hover {
+      background: #252f44;
+      border-color: var(--border-glow);
+    }
+
+    .btn-scene.active {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: var(--accent-red);
+      color: #f87171;
+      font-weight: 700;
+    }
+
+    /* Card Footer Controls */
+    .card-footer {
+      padding: 10px 16px;
+      background: rgba(14, 18, 26, 0.6);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .btn-stream-ctl {
+      flex: 1;
+      padding: 7px 10px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+
+    .btn-stream-ctl.start {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.4);
+      color: #34d399;
+    }
+
+    .btn-stream-ctl.start:hover {
+      background: #10b981;
+      color: #fff;
+    }
+
+    .btn-stream-ctl.stop {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+
+    .btn-stream-ctl.stop:hover {
+      background: #ef4444;
+      color: #fff;
+    }
+
+    /* SweetAlert2 IRLCONTROL Theme */
+    .swal-custom-dark {
+      background: #111827 !important;
+      color: #f3f4f6 !important;
+      border: 1px solid #374151 !important;
+      border-radius: 14px !important;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8) !important;
+    }
+    .swal2-title {
+      color: #f9fafb !important;
+      font-family: 'Inter', sans-serif !important;
+      font-size: 19px !important;
+    }
+    .swal2-html-container {
+      color: #9ca3af !important;
+      font-family: 'Inter', sans-serif !important;
+      font-size: 14px !important;
+    }
+    .swal-confirm-btn-start {
+      color: #030712 !important;
+      font-weight: 700 !important;
+    }
+    .swal-confirm-btn-stop {
+      color: #ffffff !important;
+      font-weight: 700 !important;
+    }
+
+    .btn-icon-link {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 13px;
+      transition: all 0.15s ease;
+    }
+
+    .btn-icon-link:hover {
+      color: var(--text-main);
+      border-color: var(--border-glow);
+      background: #232c40;
+    }
+
+    /* Broadcast Dense Table View */
+    .table-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow-x: auto;
+      display: none;
+    }
+
+    table.dense-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+      text-align: left;
+    }
+
+    table.dense-table th {
+      background: #0f131c;
+      padding: 12px 14px;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    table.dense-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      vertical-align: middle;
+    }
+
+    table.dense-table tr:hover td {
+      background: rgba(255,255,255,0.02);
+    }
+
+    /* Modal / Drawer */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      padding: 20px;
+    }
+
+    .modal-backdrop.open { display: flex; }
+
+    .modal-window {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 680px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      max-height: 90vh;
+    }
+
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #151a26;
+    }
+
+    .modal-header h3 {
+      font-size: 16px;
+      color: #fff;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+    }
+
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .settings-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .settings-field label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .settings-field input {
+      background: #090c12;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 9px 12px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .settings-field input:focus {
+      border-color: var(--accent-blue);
+    }
+
+    .modal-footer {
+      padding: 14px 20px;
+      background: #0f131c;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    /* Toast Notification */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 300;
+    }
+
+    .toast {
+      background: #171d2b;
+      border: 1px solid var(--border-glow);
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 12.5px;
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: slideIn 0.25s ease forwards;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(50px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    /* SweetAlert2 Custom Dark Theme */
+    .swal2-popup.swal-custom-dark {
+      background: #121620 !important;
+      border: 1px solid #384666 !important;
+      border-radius: 12px !important;
+      color: #f1f5f9 !important;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7) !important;
+    }
+    .swal2-popup.swal-custom-dark .swal2-title {
+      color: #fff !important;
+      font-size: 19px !important;
+      font-weight: 700 !important;
+    }
+    .swal2-popup.swal-custom-dark .swal2-html-container {
+      color: #94a3b8 !important;
+      font-size: 13.5px !important;
+      line-height: 1.6 !important;
+    }
+    .swal2-popup.swal-custom-dark .swal2-confirm {
+      font-weight: 700 !important;
+      font-size: 13px !important;
+      padding: 10px 20px !important;
+      border-radius: 6px !important;
+    }
+    .swal2-popup.swal-custom-dark .swal2-cancel {
+      font-weight: 700 !important;
+      font-size: 13px !important;
+      padding: 10px 20px !important;
+      border-radius: 6px !important;
+      background: #334155 !important;
+      color: #e2e8f0 !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation / Command Bar -->
+  <header>
+    <div class="header-top">
+      <div class="brand">
+        <div class="logo-badge">IRL·OBS</div>
+        <div class="brand-title">MASTER <span>MONITOR</span></div>
+        <div class="system-status-pill" id="globalStatusPill">
+          <span class="pulse-dot" id="globalDot"></span>
+          <span id="globalStatusText">EN VIVO</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Back to Admin -->
+        <a href="/" class="btn-action" style="text-decoration:none; color:var(--text-main);" title="Volver al panel de control principal">
+          ← Volver al Admin
+        </a>
+
+        <!-- Demo Mode Toggle -->
+        <button class="btn-action demo-btn" id="demoBtn" onclick="toggleDemoMode()" title="Simular instancias OBS en vivo con alertas">
+          ⚡ Modo Demo: <span id="demoStateLabel">OFF</span>
+        </button>
+
+        <!-- Audio Alert Toggle -->
+        <button class="btn-action" id="audioAlertBtn" onclick="toggleAudioAlert()" title="Alarma sonora en caso de sobrecarga o error">
+          🔔 Alertas: <span id="audioAlertLabel">ON</span>
+        </button>
+
+        <!-- Refresh Interval Selector -->
+        <select class="btn-action" id="refreshSelect" onchange="changeRefreshInterval(this.value)" style="outline:none;">
+          <option value="sse">Stream Tiempo Real (SSE)</option>
+          <option value="1000">1 segundo</option>
+          <option value="2000" selected>2 segundos</option>
+          <option value="5000">5 segundos</option>
+          <option value="0">Pausado</option>
+        </select>
+
+        <!-- Config / Settings Button -->
+        <button class="btn-action" onclick="openConfigModal()" title="Configuración de conexión API">
+          ⚙️ Servidor
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI Aggregate Bar -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Instancias OBS</div>
+        <div class="kpi-value" id="kpiTotal">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">En Vivo (On Air)</div>
+        <div class="kpi-value red" id="kpiStreaming">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Todo Correcto</div>
+        <div class="kpi-value green" id="kpiOk">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Encoding Overload</div>
+        <div class="kpi-value red" id="kpiOverload">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Bitrate Total</div>
+        <div class="kpi-value blue" id="kpiBitrate">0 kbps</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">FPS Promedio</div>
+        <div class="kpi-value green" id="kpiFps">0.0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">CPU Promedio</div>
+        <div class="kpi-value amber" id="kpiCpu">0%</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Filter & Search Toolbar -->
+  <div class="toolbar">
+    <div class="filter-group">
+      <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">Todas (<span id="countAll">0</span>)</button>
+      <button class="filter-tab" data-filter="live" onclick="setFilter('live')">● En Vivo (<span id="countLive">0</span>)</button>
+      <button class="filter-tab" data-filter="overload" onclick="setFilter('overload')">⚠️ Sobrecarga (<span id="countOverload">0</span>)</button>
+      <button class="filter-tab" data-filter="issues" onclick="setFilter('issues')">Problemas (<span id="countIssues">0</span>)</button>
+      <button class="filter-tab" data-filter="stopped" onclick="setFilter('stopped')">Detenidas (<span id="countStopped">0</span>)</button>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="Filtrar por nombre o escena..." oninput="handleSearch(this.value)">
+      </div>
+
+      <div class="view-toggle">
+        <button class="view-btn active" id="btnGrid" onclick="setViewMode('grid')" title="Vista Matriz">Matriz</button>
+        <button class="view-btn" id="btnTable" onclick="setViewMode('table')" title="Vista Tabla Densa">Tabla</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content Area -->
+  <main>
+    <!-- Cards Grid -->
+    <div class="obs-grid" id="obsGrid"></div>
+
+    <!-- Broadcast Wall Dense Table -->
+    <div class="table-container" id="obsTableContainer">
+      <table class="dense-table" id="obsTable">
+        <thead>
+          <tr>
+            <th>Instancia</th>
+            <th>Estado</th>
+            <th>Salud Codificador</th>
+            <th>FPS Activo</th>
+            <th>Bitrate</th>
+            <th>Frames Perdidos</th>
+            <th>Render GPU</th>
+            <th>CPU</th>
+            <th>RAM</th>
+            <th>Escena</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="obsTableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <h3>No se encontraron instancias de OBS</h3>
+      <p style="margin-top:6px; font-size:13px;">Verificá que el servidor API esté iniciado o activá el <b>Modo Demo</b> arriba para probar.</p>
+    </div>
+  </main>
+
+  <!-- Server Configuration Modal -->
+  <div class="modal-backdrop" id="configModal">
+    <div class="modal-window">
+      <div class="modal-header">
+        <h3>Configuración de Conexión</h3>
+        <button class="modal-close" onclick="closeConfigModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-field">
+          <label>URL Base de API neko-api-server</label>
+          <input type="text" id="cfgApiBase" placeholder="http://127.0.0.1:29800 o https://tudominio.com">
+          <small style="color:var(--text-dim); font-size:11px;">Dejar vacío para usar el mismo host actual del navegador.</small>
+        </div>
+        <div class="settings-field">
+          <label>API Token (Bearer / Secret)</label>
+          <input type="password" id="cfgApiToken" placeholder="API_TOKEN o JWT">
+        </div>
+
+        <div style="border-top:1px solid var(--border); margin:16px 0 12px 0; padding-top:14px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <h4 style="font-size:13px; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+              <span>📲</span> Notificaciones Webhook (WhatsApp Tasks API)
+            </h4>
+            <button class="btn-action" style="font-size:11px; padding:4px 8px;" type="button" onclick="testWebhookFromModal()">🧪 Probar</button>
+          </div>
+          <div class="settings-field">
+            <label>URL del Webhook (WhatsappTasksAPI)</label>
+            <input type="text" id="cfgWebhookUrl" placeholder="https://api.tu-bot.com/api/webhook/neko o /webhook/irlcontrol">
+          </div>
+          <div class="settings-field">
+            <label>Webhook Secret (x-webhook-secret)</label>
+            <input type="password" id="cfgWebhookSecret" placeholder="wh_irl_k9G4mTzXp2sR7vBnQ8dF">
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px; font-size:12px; color:var(--text-muted);">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="cfgWebhookEnabled" checked> <b>Habilitar envío de Webhooks</b>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-left:20px;">
+              <input type="checkbox" id="cfgWebhookEvents" checked> Avisar cuando se <b>prende</b> o <b>apaga</b> una instancia (Manual o Watchdog)
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-left:20px;">
+              <input type="checkbox" id="cfgWebhookAlerts" checked> Alertar si una instancia <b>satura o entra en estado crítico</b> (Codificador / FPS / Congestión)
+            </label>
+          </div>
+        </div>
+
+        <div style="background:#090c12; border:1px solid var(--border); border-radius:6px; padding:12px; font-size:12px; color:var(--text-muted); line-height:1.5;">
+          💡 <b>Conexión en tiempo real:</b> El panel intentará conectar vía Server-Sent Events (SSE) a <code>/monitor/stream</code> para recibir actualizaciones cada 1.5s. Si SSE no está disponible, cambiará automáticamente a sondeo HTTP estándar.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-action" onclick="closeConfigModal()">Cancelar</button>
+        <button class="btn-action active" onclick="saveConfig()">Guardar y Conectar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Drilldown Modal -->
+  <div class="modal-backdrop" id="detailModal">
+    <div class="modal-window" style="max-width:760px;">
+      <div class="modal-header">
+        <h3 id="modalDetailTitle">Diagnóstico Técnico OBS</h3>
+        <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalDetailContent"></div>
+      <div class="modal-footer">
+        <button class="btn-action" onclick="closeDetailModal()">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  
+  <!-- Targets (Salidas Multi-RTMP) Modal -->
+  <div class="modal-backdrop" id="targetsModal">
+    <div class="modal-window" style="max-width:840px;">
+      <div class="modal-header">
+        <h3 id="modalTargetsTitle">⚙️ Configuración de Salidas (Multi-RTMP)</h3>
+        <button class="modal-close" onclick="closeTargetsModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalTargetsContent"></div>
+      <div class="modal-footer">
+        <button class="btn-action" onclick="closeTargetsModal()">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    // Global State
+    let currentFilter = 'all';
+    let currentSearch = '';
+    let currentView = 'grid';
+    let isDemoMode = false;
+    let audioAlertEnabled = true;
+    let refreshMode = '2000';
+    let pollingTimer = null;
+    let sseSource = null;
+    let instancesData = [];
+    let prevOverloadedSet = new Set();
+
+    // Standard Scenes
+    const STANDARD_SCENES = ["LIVE", "STARTING", "LOW", "DISCONNECTED", "REFRESH", "VIDEO-FEEDS"];
+
+    // Audio Alert Synthesizer (Web Audio API - zero external assets)
+    let audioCtx = null;
+    function playBeep(frequency = 880, type = 'sine', duration = 0.15) {
+      if (!audioAlertEnabled) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) { /* audio blocked */ }
+    }
+
+    function playOverloadChime() {
+      playBeep(440, 'triangle', 0.12);
+      setTimeout(() => playBeep(880, 'sawtooth', 0.25), 130);
+    }
+
+    // Config Persistence
+    function getApiBase() {
+      let b = localStorage.getItem('obsmon_apiBase') || '';
+      if (!b) {
+        if (window.location.hostname.includes('servidor.irlcontrol.run')) {
+          b = 'https://api.servidor.irlcontrol.run';
+        } else if (window.location.protocol.startsWith('http') && !window.location.host.includes('localhost') && !window.location.host.includes('127.0.0.1')) {
+          b = 'https://api.servidor.irlcontrol.run';
+        } else if (window.location.protocol.startsWith('http')) {
+          b = window.location.origin;
+        } else {
+          b = 'https://api.servidor.irlcontrol.run';
+        }
+      }
+      return b.replace(/\/+$/, '');
+    }
+
+    function getApiToken() {
+      return localStorage.getItem('obsmon_apiToken') || localStorage.getItem('neko_admin_token') || localStorage.getItem('irlctl_cfgWsPass') || '';
+    }
+
+    function saveConfig() {
+      const base = document.getElementById('cfgApiBase').value.trim();
+      const token = document.getElementById('cfgApiToken').value.trim();
+      localStorage.setItem('obsmon_apiBase', base);
+      localStorage.setItem('obsmon_apiToken', token);
+      closeConfigModal();
+      showToast('Configuración guardada. Reconectando...');
+      restartConnection();
+    }
+
+    function openConfigModal() {
+      document.getElementById('cfgApiBase').value = localStorage.getItem('obsmon_apiBase') || '';
+      document.getElementById('cfgApiToken').value = localStorage.getItem('obsmon_apiToken') || '';
+      document.getElementById('configModal').classList.add('open');
+    }
+
+    function closeConfigModal() {
+      document.getElementById('configModal').classList.remove('open');
+    }
+
+    function toggleAudioAlert() {
+      audioAlertEnabled = !audioAlertEnabled;
+      document.getElementById('audioAlertLabel').textContent = audioAlertEnabled ? 'ON' : 'OFF';
+      document.getElementById('audioAlertBtn').classList.toggle('active', audioAlertEnabled);
+      if (audioAlertEnabled) playBeep(660, 'sine', 0.1);
+      showToast(audioAlertEnabled ? 'Alertas sonoras habilitadas' : 'Alertas sonoras silenciadas');
+    }
+
+    // Formatters
+    function fmtBitrate(kbps) {
+      if (!kbps || kbps <= 0) return '0 kbps';
+      if (kbps >= 1000) return (kbps / 1000).toFixed(1) + ' Mbps';
+      return kbps + ' kbps';
+    }
+
+    function fmtBytes(bytes) {
+      if (!bytes) return '0 MB';
+      const mb = bytes / (1024 * 1024);
+      if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
+      return mb.toFixed(1) + ' MB';
+    }
+
+    function fmtTimecode(ms) {
+      if (!ms) return '00:00:00';
+      const s = Math.floor(ms / 1000);
+      const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+      const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      return `${hh}:${mm}:${ss}`;
+    }
+
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = msg;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // View & Filter Handlers
+    function setViewMode(mode) {
+      currentView = mode;
+      document.getElementById('btnGrid').classList.toggle('active', mode === 'grid');
+      document.getElementById('btnTable').classList.toggle('active', mode === 'table');
+      document.getElementById('obsGrid').style.display = mode === 'grid' ? 'grid' : 'none';
+      document.getElementById('obsTableContainer').style.display = mode === 'table' ? 'block' : 'none';
+      renderDashboard();
+    }
+
+    function setFilter(filter) {
+      currentFilter = filter;
+      document.querySelectorAll('.filter-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.filter === filter);
+      });
+      renderDashboard();
+    }
+
+    function handleSearch(val) {
+      currentSearch = val.toLowerCase().trim();
+      renderDashboard();
+    }
+
+    // Filter Logic
+    function getFilteredInstances() {
+      return instancesData.filter(inst => {
+        if (currentSearch) {
+          const matchName = inst.name.toLowerCase().includes(currentSearch);
+          const matchScene = (inst.currentScene || '').toLowerCase().includes(currentSearch);
+          if (!matchName && !matchScene) return false;
+        }
+
+        if (currentFilter === 'live') return inst.streaming;
+        if (currentFilter === 'overload') return inst.encodingOverloaded;
+        if (currentFilter === 'issues') return inst.streaming && (inst.health === 'CRITICAL' || inst.health === 'WARNING');
+        if (currentFilter === 'stopped') return !/up|running/i.test(inst.status);
+        return true;
+      });
+    }
+
+    // Main Render Function
+    function renderDashboard() {
+      const filtered = getFilteredInstances();
+      const grid = document.getElementById('obsGrid');
+      const tableBody = document.getElementById('obsTableBody');
+      const emptyState = document.getElementById('emptyState');
+
+      emptyState.style.display = filtered.length === 0 ? 'block' : 'none';
+
+      // Counts for toolbar tabs
+      document.getElementById('countAll').textContent = instancesData.length;
+      document.getElementById('countLive').textContent = instancesData.filter(i => i.streaming).length;
+      document.getElementById('countOverload').textContent = instancesData.filter(i => i.encodingOverloaded).length;
+      document.getElementById('countIssues').textContent = instancesData.filter(i => i.streaming && (i.health === 'CRITICAL' || i.health === 'WARNING')).length;
+      document.getElementById('countStopped').textContent = instancesData.filter(i => !/up|running/i.test(i.status)).length;
+
+      // Check for new encoding overloads to trigger audio chime
+      filtered.forEach(inst => {
+        if (inst.encodingOverloaded && !prevOverloadedSet.has(inst.name)) {
+          playOverloadChime();
+          showToast(`🚨 ¡SOBRECARGA DE CODIFICADOR EN ${inst.name}!`);
+        }
+      });
+      prevOverloadedSet = new Set(instancesData.filter(i => i.encodingOverloaded).map(i => i.name));
+
+      if (currentView === 'grid') {
+        grid.innerHTML = filtered.map(inst => renderCard(inst)).join('');
+      } else {
+        tableBody.innerHTML = filtered.map(inst => renderTableRow(inst)).join('');
+      }
+    }
+
+    // Render OBS Card
+    function renderCard(inst) {
+      const isRunning = /up|running/i.test(inst.status);
+      const isOverloaded = inst.encodingOverloaded;
+      const isLive = inst.streaming;
+      const fps = inst.activeFps || 0;
+      const targetFps = inst.targetFps || 60;
+      
+      let fpsClass = 'fps-green';
+      if (fps < targetFps * 0.75) fpsClass = 'fps-red';
+      else if (fps < targetFps * 0.9) fpsClass = 'fps-amber';
+
+      const renderBudget = inst.renderTimeBudgetMs || 16.67;
+      const renderTime = inst.renderTimeMs || 0;
+      const renderPercent = Math.min(100, Math.round((renderTime / renderBudget) * 100));
+      const renderBarColor = renderPercent > 100 ? 'red' : (renderPercent > 75 ? 'amber' : 'green');
+
+      let statusCardClass = '';
+      let healthBadgeColor = '#64748b';
+      let healthBadgeLabel = '○ DETENIDO';
+
+      if (isLive) {
+        if (inst.health === 'CRITICAL') {
+          statusCardClass = 'status-critical';
+          healthBadgeColor = '#f87171';
+          healthBadgeLabel = '✖ CRÍTICO';
+        } else if (inst.health === 'WARNING') {
+          statusCardClass = 'status-warning';
+          healthBadgeColor = '#fbbf24';
+          healthBadgeLabel = '▲ ALERTA';
+        } else {
+          healthBadgeColor = '#34d399';
+          healthBadgeLabel = '● TODO OK';
+        }
+      } else if (isRunning) {
+        healthBadgeColor = '#94a3b8';
+        healthBadgeLabel = '○ STANDBY';
+      } else {
+        healthBadgeColor = '#64748b';
+        healthBadgeLabel = '○ DETENIDO';
+      }
+
+      let streamPillClass = 'offline';
+      let streamPillLabel = 'OFFLINE';
+      if (inst.reconnecting) {
+        streamPillClass = 'reconnecting';
+        streamPillLabel = 'RECONECTANDO';
+      } else if (isLive) {
+        streamPillClass = 'live';
+        streamPillLabel = '● EN VIVO';
+      } else if (isRunning) {
+        streamPillLabel = 'STANDBY';
+      } else {
+        streamPillLabel = 'DETENIDO';
+      }
+
+      return `
+        <div class="obs-card ${statusCardClass}" id="card-${inst.name}">
+          ${isOverloaded ? `
+            <div class="overload-alert-banner">
+              <span>⚠️ SOBRECARGA DE CODIFICADOR DETECTADA</span>
+              <span>+${inst.dEncoderSkipped || 0} frames</span>
+            </div>
+          ` : ''}
+
+          <div class="card-head">
+            <div class="instance-info">
+              <div class="instance-title">
+                ${inst.name}
+                <span style="font-size:11px; font-weight:600; color:${healthBadgeColor}">
+                  ${healthBadgeLabel}
+                </span>
+              </div>
+              <div class="instance-alias">WS :${inst.obsWsPort || '--'} | ${inst.publicAlias || inst.name}</div>
+            </div>
+            <div class="stream-pill ${streamPillClass}">${streamPillLabel}</div>
+          </div>
+
+          <div class="card-body">
+            <!-- Core Highlight: FPS & Bitrate -->
+            <div class="metrics-highlight-box">
+              <div class="highlight-item">
+                <div class="highlight-label">FPS Activo</div>
+                <div class="highlight-val ${fpsClass}">${fps.toFixed(1)} <span style="font-size:12px; color:var(--text-muted); font-weight:500;">/ ${targetFps}</span></div>
+              </div>
+              <div class="highlight-item">
+                <div class="highlight-label">Bitrate Stream</div>
+                <div class="highlight-val" style="color:#60a5fa;">${fmtBitrate(inst.bitrateKbps)}</div>
+              </div>
+            </div>
+
+            <!-- Encoding & Hardware Overload Health -->
+            <div class="indicator-strip">
+              <div class="indicator-row">
+                <span class="indicator-name">Codificador (Hardware/CPU)</span>
+                <span class="indicator-state" style="color:${isOverloaded ? '#f87171' : '#34d399'};">
+                  ${isOverloaded ? '⚠️ SOBRECARGADO' : '🟢 ÓPTIMO'}
+                </span>
+              </div>
+              <div class="indicator-row" style="font-size:11px; color:var(--text-muted);">
+                <span>Frames salteados encoder:</span>
+                <span style="font-family:'JetBrains Mono'; font-weight:600; color:${(inst.encoderSkippedFrames || 0) > 0 ? '#fbbf24' : 'inherit'};">
+                  ${inst.encoderSkippedFrames || 0} (${inst.encoderSkippedPercent || 0}%)
+                </span>
+              </div>
+            </div>
+
+            <!-- GPU Render Time & Bottleneck -->
+            <div class="indicator-strip">
+              <div class="indicator-row">
+                <span class="indicator-name">Render GPU / Frame Time</span>
+                <span class="indicator-state" style="color:${renderPercent > 90 ? '#f87171' : '#34d399'}">${renderTime.toFixed(1)}ms <span style="font-size:10px; color:var(--text-muted)">/ ${renderBudget}ms</span></span>
+              </div>
+              <div class="meter-container">
+                <div class="meter-bar ${renderBarColor}" style="width:${renderPercent}%;"></div>
+              </div>
+              <div class="indicator-row" style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                <span>Render frames perdidos:</span>
+                <span style="font-family:'JetBrains Mono';">${inst.renderSkippedFrames || 0}</span>
+              </div>
+            </div>
+
+            <!-- Network & Congestion -->
+            <div class="indicator-strip">
+              <div class="indicator-row">
+                <span class="indicator-name">Pérdida de Red & Congestión</span>
+                <span class="indicator-state" style="color:${(inst.networkCongestion || 0) > 15 ? '#f87171' : '#34d399'}">
+                  ${inst.networkCongestion || 0}% congestión
+                </span>
+              </div>
+              <div class="indicator-row" style="font-size:11px; color:var(--text-muted);">
+                <span>Dropped frames red:</span>
+                <span style="font-family:'JetBrains Mono';">${inst.networkSkippedFrames || 0}</span>
+              </div>
+            </div>
+
+            <!-- System Resources & Uptime -->
+            <div style="display:flex; justify-content:space-between; font-size:11.5px; color:var(--text-muted); padding:2px 4px;">
+              <span>Uptime: <b style="color:#fff; font-family:'JetBrains Mono'">${inst.outputTimecode || '00:00:00'}</b></span>
+              <span>CPU: <b style="color:#fff;">${inst.cpuUsage || 0}%</b> | RAM: <b style="color:#fff;">${inst.memoryMb || 0} MB</b></span>
+            </div>
+
+            <!-- Quick Scene Switcher -->
+            <div class="scene-selector-row">
+              <div class="scene-label-row">
+                <span>Escena Programa: <b style="color:#fff; text-transform:none;">${inst.currentScene || 'None'}</b></span>
+              </div>
+              <div class="scene-buttons-grid">
+                ${STANDARD_SCENES.slice(0, 3).map(scene => `
+                  <button class="btn-scene ${inst.currentScene === scene ? 'active' : ''}" onclick="setScene('${inst.name}', '${scene}')">${scene}</button>
+                `).join('')}
+                ${STANDARD_SCENES.slice(3, 6).map(scene => `
+                  <button class="btn-scene ${inst.currentScene === scene ? 'active' : ''}" onclick="setScene('${inst.name}', '${scene}')">${scene}</button>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+          <!-- Card Footer Controls -->
+          <div class="card-footer">
+            ${isLive ? `
+              <button class="btn-stream-ctl stop" onclick="stopStream('${inst.name}', event)">■ Detener Stream</button>
+            ` : `
+              <button class="btn-stream-ctl start" onclick="startStream('${inst.name}', event)">▶ Iniciar Stream</button>
+            `}
+            <a class="btn-icon-link" href="${inst.panelUrl || '#'}" target="_blank" title="Abrir Escritorio Neko">🖥️</a>
+            <button class="btn-icon-link" onclick="openTargetsModal('${inst.name}')" title="Configurar Salidas Multi-RTMP / Keys" style="color:#60a5fa;">⚙️</button>
+            <button class="btn-icon-link" onclick="openDetails('${inst.name}')" title="Diagnóstico Completo">🔍</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Render Table Row
+    function renderTableRow(inst) {
+      const isLive = inst.streaming;
+      const isOverload = inst.encodingOverloaded;
+      const isRunning = /up|running/i.test(inst.status);
+
+      let estadoPillClass = isLive ? 'live' : 'offline';
+      let estadoPillLabel = isLive ? '● LIVE' : (isRunning ? 'STANDBY' : 'DETENIDO');
+
+      let codificadorColor = '#64748b';
+      let codificadorLabel = '○ APAGADO';
+      if (isLive) {
+        if (isOverload) {
+          codificadorColor = '#f87171';
+          codificadorLabel = '⚠️ SOBRECARGADO';
+        } else {
+          codificadorColor = '#34d399';
+          codificadorLabel = '🟢 ÓPTIMO';
+        }
+      } else if (isRunning) {
+        codificadorColor = '#94a3b8';
+        codificadorLabel = '○ STANDBY';
+      }
+
+      return `
+        <tr>
+          <td>
+            <b>${inst.name}</b>
+            <div style="font-size:11px; color:var(--text-muted);">${inst.publicAlias || inst.name}</div>
+          </td>
+          <td>
+            <span class="stream-pill ${estadoPillClass}" style="font-size:10px; padding:2px 8px;">
+              ${estadoPillLabel}
+            </span>
+          </td>
+          <td>
+            <span style="font-weight:700; color:${codificadorColor};">
+              ${codificadorLabel}
+            </span>
+          </td>
+          <td style="font-family:'JetBrains Mono'; font-weight:700; color:${(inst.activeFps || 0) < 55 ? '#f87171' : '#34d399'}">
+            ${(inst.activeFps || 0).toFixed(1)} FPS
+          </td>
+          <td style="font-family:'JetBrains Mono'; font-weight:700; color:#60a5fa;">
+            ${fmtBitrate(inst.bitrateKbps)}
+          </td>
+          <td style="font-family:'JetBrains Mono';">
+            ${inst.encoderSkippedFrames || 0} (enc) / ${inst.networkSkippedFrames || 0} (red)
+          </td>
+          <td style="font-family:'JetBrains Mono';">
+            ${(inst.renderTimeMs || 0).toFixed(1)}ms
+          </td>
+          <td style="font-family:'JetBrains Mono';">${inst.cpuUsage || 0}%</td>
+          <td style="font-family:'JetBrains Mono';">${inst.memoryMb || 0} MB</td>
+          <td><b>${inst.currentScene || '--'}</b></td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              ${isLive ? `
+                <button class="btn-action" style="padding:4px 8px; font-size:11px; color:#f87171;" onclick="stopStream('${inst.name}', event)">Stop</button>
+              ` : `
+                <button class="btn-action" style="padding:4px 8px; font-size:11px; color:#34d399;" onclick="startStream('${inst.name}', event)">Start</button>
+              `}
+              <button class="btn-action" style="padding:4px 8px; font-size:11px; color:#60a5fa;" onclick="openTargetsModal('${inst.name}')" title="Configurar Salidas Multi-RTMP">⚙️ Salidas</button>
+              <button class="btn-action" style="padding:4px 8px; font-size:11px;" onclick="openDetails('${inst.name}')">Info</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    // Detail Modal
+    function openDetails(name) {
+      const inst = instancesData.find(i => i.name === name);
+      if (!inst) return;
+
+      document.getElementById('modalDetailTitle').textContent = `Diagnóstico Técnico — ${inst.name}`;
+      const body = document.getElementById('modalDetailContent');
+      body.innerHTML = `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="indicator-strip">
+            <span class="indicator-name">Resolución de Entrada / Salida</span>
+            <span class="indicator-state">${inst.baseResolution || '1920x1080'} ➔ ${inst.outputResolution || '1920x1080'}</span>
+          </div>
+          <div class="indicator-strip">
+            <span class="indicator-name">FPS Objetivo</span>
+            <span class="indicator-state">${inst.targetFps || 60} FPS (Presupuesto frame: ${inst.renderTimeBudgetMs || 16.67}ms)</span>
+          </div>
+          <div class="indicator-strip">
+            <span class="indicator-name">Uptime de Transmisión</span>
+            <span class="indicator-state">${inst.outputTimecode || '00:00:00'} (${fmtTimecode(inst.outputDurationMs)})</span>
+          </div>
+          <div class="indicator-strip">
+            <span class="indicator-name">Tráfico Total Emitido</span>
+            <span class="indicator-state">${fmtBytes(inst.outputBytes)}</span>
+          </div>
+          <div class="indicator-strip">
+            <span class="indicator-name">Frames Totales Codificados</span>
+            <span class="indicator-state">${inst.encoderTotalFrames || 0}</span>
+          </div>
+          <div class="indicator-strip">
+            <span class="indicator-name">Frames Salteados Codificador</span>
+            <span class="indicator-state" style="color:${(inst.encoderSkippedFrames || 0) > 0 ? '#f87171' : 'inherit'}">
+              ${inst.encoderSkippedFrames || 0} (${inst.encoderSkippedPercent || 0}%)
+            </span>
+          </div>
+          <div class="indicator-strip">
+            <span class="indicator-name">Frames Totales Renderizados</span>
+            <span class="indicator-state">${inst.renderTotalFrames || 0}</span>
+          </div>
+          <div class="indicator-strip">
+            <span class="indicator-name">Frames Salteados Render GPU</span>
+            <span class="indicator-state" style="color:${(inst.renderSkippedFrames || 0) > 0 ? '#f87171' : 'inherit'}">
+              ${inst.renderSkippedFrames || 0} (${inst.renderSkippedPercent || 0}%)
+            </span>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <h4 style="font-size:12.5px; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Alertas Activas</h4>
+          ${(inst.alerts && inst.alerts.length > 0) ? `
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${inst.alerts.map(a => `
+                <div style="background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.3); padding:8px 12px; border-radius:6px; font-size:12px; color:#fca5a5;">
+                  ${a}
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <div style="color:#34d399; font-size:12.5px;">✓ No se detectaron anomalías ni sobrecargas en esta instancia.</div>
+          `}
+        </div>
+
+        <div style="margin-top:16px; display:flex; gap:10px;">
+          <a href="${inst.panelUrl || '#'}" target="_blank" class="btn-action active" style="flex:1; justify-content:center;">
+            🖥️ Abrir Panel Neko Completo
+          </a>
+        </div>
+      `;
+
+      document.getElementById('detailModal').classList.add('open');
+    }
+
+    function closeDetailModal() {
+      document.getElementById('detailModal').classList.remove('open');
+    }
+
+    // Remote Actions (Start/Stop Stream, Set Scene)
+    async function apiAction(name, body) {
+      if (isDemoMode) {
+        const inst = instancesData.find(i => i.name === name);
+        if (!inst) return;
+        if (body.action === 'startStream') { inst.streaming = true; showToast(`[Demo] Stream iniciado en ${name}`); }
+        else if (body.action === 'stopStream') { inst.streaming = false; showToast(`[Demo] Stream detenido en ${name}`); }
+        else if (body.action === 'setScene') { inst.currentScene = body.sceneName; showToast(`[Demo] Escena cambiada a ${body.sceneName}`); }
+        renderDashboard();
+        return;
+      }
+
+      try {
+        const base = getApiBase();
+        const token = getApiToken();
+        const res = await fetch(`${base}/instances/${name}/action`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Error al ejecutar acción');
+        showToast(`Acción completada: ${body.action}`);
+        fetchSnapshot();
+      } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+      }
+    }
+
+    function startStream(name) {
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({
+          title: '¿Iniciar transmisión?',
+          html: `¿Deseas <b>INICIAR</b> la emisión en vivo de OBS para <b style="color:#00E599;">${name}</b>?`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonColor: '#00E599',
+          cancelButtonColor: '#374151',
+          confirmButtonText: 'Sí, iniciar',
+          cancelButtonText: 'Cancelar',
+          background: '#111827',
+          color: '#f3f4f6',
+          customClass: {
+            popup: 'swal-custom-dark',
+            confirmButton: 'swal-confirm-btn-start'
+          }
+        }).then((result) => {
+          if (result.isConfirmed) {
+            apiAction(name, { action: 'startStream' });
+          }
+        });
+      } else {
+        if (confirm(`¿Iniciar transmisión en OBS para '${name}'?`)) {
+          apiAction(name, { action: 'startStream' });
+        }
+      }
+    }
+
+    function stopStream(name) {
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({
+          title: '¿Detener transmisión?',
+          html: `¿Estás seguro de que deseas <b style="color:#ef4444;">DETENER</b> la emisión en vivo de OBS para <b style="color:#fff;">${name}</b>?`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#ef4444',
+          cancelButtonColor: '#374151',
+          confirmButtonText: 'Sí, detener',
+          cancelButtonText: 'Cancelar',
+          background: '#111827',
+          color: '#f3f4f6',
+          customClass: {
+            popup: 'swal-custom-dark',
+            confirmButton: 'swal-confirm-btn-stop'
+          }
+        }).then((result) => {
+          if (result.isConfirmed) {
+            apiAction(name, { action: 'stopStream' });
+          }
+        });
+      } else {
+        if (confirm(`¿DETENER transmisión en OBS para '${name}'?`)) {
+          apiAction(name, { action: 'stopStream' });
+        }
+      }
+    }
+
+    function setScene(name, sceneName) {
+      apiAction(name, { action: 'setScene', sceneName });
+    }
+
+    // Update Summary KPI Bar
+    function updateKPIs(summary) {
+      document.getElementById('kpiTotal').textContent = summary.totalInstances || 0;
+      document.getElementById('kpiStreaming').textContent = summary.streamingCount || 0;
+      document.getElementById('kpiOk').textContent = summary.okCount || 0;
+      document.getElementById('kpiOverload').textContent = summary.encodingOverloadCount || 0;
+      document.getElementById('kpiBitrate').textContent = fmtBitrate(summary.totalBitrateKbps || 0);
+      document.getElementById('kpiFps').textContent = (summary.avgFps || 0).toFixed(1);
+      document.getElementById('kpiCpu').textContent = (summary.avgCpu || 0).toFixed(1) + '%';
+
+      const dot = document.getElementById('globalDot');
+      const text = document.getElementById('globalStatusText');
+      if (summary.encodingOverloadCount > 0) {
+        dot.className = 'pulse-dot red';
+        text.textContent = `SOBRECARGA (${summary.encodingOverloadCount})`;
+        text.style.color = '#f87171';
+      } else {
+        dot.className = 'pulse-dot';
+        text.textContent = 'EN VIVO — TODO CORRECTO';
+        text.style.color = '#34d399';
+      }
+    }
+
+    function redirectToLogin() {
+      const q = new URLSearchParams(location.search);
+      if (q.has('demo') && q.get('demo') === '1') return;
+
+      if (window.location.protocol.startsWith('http')) {
+        const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = `/?redirect=${returnUrl}`;
+      } else {
+        openConfigModal();
+        showToast('Debes iniciar sesión para conectar al monitor', 'error');
+      }
+    }
+
+    // Fetch snapshot from Backend API
+    async function fetchSnapshot() {
+      if (isDemoMode) return;
+      const base = getApiBase();
+      const token = getApiToken();
+      if (!token) {
+        redirectToLogin();
+        return;
+      }
+      try {
+        const url = `${base}/monitor/instances` + (token ? `?token=${encodeURIComponent(token)}` : '');
+        const res = await fetch(url, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (res.status === 401) {
+          localStorage.removeItem('neko_admin_token');
+          localStorage.removeItem('obsmon_apiToken');
+          redirectToLogin();
+          return;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.ok) {
+          instancesData = data.instances || [];
+          updateKPIs(data.summary || {});
+          renderDashboard();
+        }
+      } catch (err) {
+        console.warn('[Monitor] Polling error:', err.message);
+      }
+    }
+
+    // Start / Restart Connection
+    function restartConnection() {
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+      if (pollingTimer) {
+        clearInterval(pollingTimer);
+        pollingTimer = null;
+      }
+
+      if (isDemoMode) {
+        runDemoTick();
+        pollingTimer = setInterval(runDemoTick, 1500);
+        return;
+      }
+
+      const base = getApiBase();
+      const token = getApiToken();
+      if (!token) {
+        redirectToLogin();
+        return;
+      }
+
+      if (refreshMode === 'sse') {
+        const streamUrl = `${base}/monitor/stream` + (token ? `?token=${encodeURIComponent(token)}` : '');
+        try {
+          sseSource = new EventSource(streamUrl);
+          sseSource.onmessage = (e) => {
+            try {
+              const data = JSON.parse(e.data);
+              instancesData = data.instances || [];
+              updateKPIs(data.summary || {});
+              renderDashboard();
+            } catch (err) {}
+          };
+          sseSource.onerror = () => {
+            console.warn('[Monitor] SSE disconnected, falling back to polling 2s');
+            sseSource.close();
+            sseSource = null;
+            pollingTimer = setInterval(fetchSnapshot, 2000);
+          };
+        } catch (e) {
+          pollingTimer = setInterval(fetchSnapshot, 2000);
+        }
+      } else if (Number(refreshMode) > 0) {
+        fetchSnapshot();
+        pollingTimer = setInterval(fetchSnapshot, Number(refreshMode));
+      }
+    }
+
+    function changeRefreshInterval(val) {
+      refreshMode = val;
+      restartConnection();
+      showToast(`Frecuencia de actualización: ${val === 'sse' ? 'Tiempo Real (SSE)' : val + 'ms'}`);
+    }
+
+    // Demo Mode Simulation
+    function toggleDemoMode() {
+      isDemoMode = !isDemoMode;
+      const btn = document.getElementById('demoBtn');
+      btn.classList.toggle('active', isDemoMode);
+      document.getElementById('demoStateLabel').textContent = isDemoMode ? 'ON' : 'OFF';
+
+      if (isDemoMode) {
+        initDemoData();
+        showToast('Modo Demostración Activado: mostrando instancias simuladas en vivo.');
+      } else {
+        showToast('Modo Demostración Desactivado: reconectando al backend real.');
+      }
+      restartConnection();
+    }
+
+    function initDemoData() {
+      instancesData = [
+        {
+          name: 'obs-backpack-01',
+          status: 'Up 4 hours',
+          connected: true,
+          streaming: true,
+          health: 'OK',
+          activeFps: 60.0,
+          targetFps: 60,
+          bitrateKbps: 6450,
+          cpuUsage: 14.2,
+          memoryMb: 480,
+          currentScene: 'LIVE',
+          encodingOverloaded: false,
+          encoderSkippedFrames: 0,
+          encoderSkippedPercent: 0,
+          dEncoderSkipped: 0,
+          renderTimeMs: 4.2,
+          renderTimeBudgetMs: 16.67,
+          renderSkippedFrames: 0,
+          networkCongestion: 0,
+          networkSkippedFrames: 0,
+          outputTimecode: '02:45:18',
+          outputDurationMs: 9918000,
+          outputBytes: 7450000000,
+          publicAlias: 'backpack1.servidor.irlcontrol.run',
+          obsWsPort: 29550,
+          webPort: 29500,
+        },
+        {
+          name: 'obs-backpack-02',
+          status: 'Up 1 hour',
+          connected: true,
+          streaming: true,
+          health: 'CRITICAL',
+          activeFps: 48.2,
+          targetFps: 60,
+          bitrateKbps: 5800,
+          cpuUsage: 89.5,
+          memoryMb: 820,
+          currentScene: 'LIVE',
+          encodingOverloaded: true, // Simulating Encoding Overload
+          encoderSkippedFrames: 428,
+          encoderSkippedPercent: 3.4,
+          dEncoderSkipped: 14,
+          renderTimeMs: 19.8,
+          renderTimeBudgetMs: 16.67,
+          renderSkippedFrames: 210,
+          networkCongestion: 4.2,
+          networkSkippedFrames: 12,
+          outputTimecode: '01:14:32',
+          outputDurationMs: 4472000,
+          outputBytes: 3200000000,
+          publicAlias: 'backpack2.servidor.irlcontrol.run',
+          obsWsPort: 29551,
+          webPort: 29501,
+          alerts: ['⚠️ SOBRECARGA DE CODIFICADOR (descartando frames: +14 frames, total 3.4%)', 'Renderizado GPU al límite (19.8ms de 16.67ms)']
+        },
+        {
+          name: 'obs-studio-main',
+          status: 'Up 12 hours',
+          connected: true,
+          streaming: true,
+          health: 'WARNING',
+          activeFps: 57.8,
+          targetFps: 60,
+          bitrateKbps: 7100,
+          cpuUsage: 45.0,
+          memoryMb: 610,
+          currentScene: 'LOW',
+          encodingOverloaded: false,
+          encoderSkippedFrames: 2,
+          encoderSkippedPercent: 0.01,
+          dEncoderSkipped: 0,
+          renderTimeMs: 12.4,
+          renderTimeBudgetMs: 16.67,
+          renderSkippedFrames: 5,
+          networkCongestion: 22.0,
+          networkSkippedFrames: 85,
+          outputTimecode: '05:10:04',
+          outputDurationMs: 18604000,
+          outputBytes: 15400000000,
+          publicAlias: 'studiomain.servidor.irlcontrol.run',
+          obsWsPort: 29552,
+          webPort: 29502,
+          alerts: ['Congestión de red elevada (22.0% / frames descartados red: 85)']
+        },
+        {
+          name: 'obs-backup-04',
+          status: 'stopped',
+          connected: false,
+          streaming: false,
+          health: 'STOPPED',
+          activeFps: 0,
+          targetFps: 60,
+          bitrateKbps: 0,
+          cpuUsage: 0,
+          memoryMb: 0,
+          currentScene: 'DISCONNECTED',
+          encodingOverloaded: false,
+          encoderSkippedFrames: 0,
+          renderTimeMs: 0,
+          networkCongestion: 0,
+          outputTimecode: '00:00:00',
+          publicAlias: 'backup4.servidor.irlcontrol.run',
+          obsWsPort: 29553,
+          webPort: 29503,
+        }
+      ];
+    }
+
+    function runDemoTick() {
+      if (!isDemoMode) return;
+      instancesData.forEach(inst => {
+        if (!inst.streaming) return;
+        // Jitter simulation
+        if (inst.encodingOverloaded) {
+          inst.activeFps = +(46 + Math.random() * 5).toFixed(1);
+          inst.encoderSkippedFrames += Math.floor(Math.random() * 4);
+          inst.dEncoderSkipped = Math.floor(Math.random() * 6);
+          inst.renderTimeMs = +(18.0 + Math.random() * 3.5).toFixed(1);
+        } else {
+          inst.activeFps = +(59.6 + Math.random() * 0.4).toFixed(1);
+          inst.renderTimeMs = +(3.8 + Math.random() * 1.5).toFixed(1);
+        }
+        inst.bitrateKbps = Math.floor(inst.bitrateKbps + (Math.random() * 300 - 150));
+      });
+
+      const streamingCount = instancesData.filter(i => i.streaming).length;
+      const okCount = instancesData.filter(i => i.health === 'OK').length;
+      const overloadCount = instancesData.filter(i => i.encodingOverloaded).length;
+      const totalBitrate = instancesData.reduce((acc, i) => acc + (i.bitrateKbps || 0), 0);
+
+      updateKPIs({
+        totalInstances: instancesData.length,
+        streamingCount,
+        okCount,
+        warnCount: 1,
+        criticalCount: overloadCount,
+        encodingOverloadCount: overloadCount,
+        totalBitrateKbps: totalBitrate,
+        avgFps: 55.3,
+        avgCpu: 49.5
+      });
+
+      renderDashboard();
+    }
+
+    // Auto-init on DOM ready
+    window.addEventListener('DOMContentLoaded', () => {
+      // Check query params
+      const q = new URLSearchParams(location.search);
+      if (q.has('demo') && q.get('demo') === '1') {
+        toggleDemoMode();
+        return;
+      }
+      const token = getApiToken();
+      if (!token) {
+        redirectToLogin();
+        return;
+      }
+      restartConnection();
+    });
+  </script>
+</body>
+</html>
