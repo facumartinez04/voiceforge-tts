@@ -1,6 +1,8 @@
 services:
   vastai-controller:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: vastai-controller
     restart: unless-stopped
     ports:
