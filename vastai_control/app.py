@@ -135,8 +135,6 @@ async def tts_start(secret: str = ""):
     if not offers:
         raise HTTPException(status_code=503, detail="No hay GPUs disponibles en Vast.ai o la API key es inválida")
 
-    best = offers[0]
-
     env_vars = {"-p 29783:29783": "1", "-e PORT=29783": "1"}
     if CF_TUNNEL_TOKEN:
         env_vars[f"-e CLOUDFLARE_TUNNEL_TOKEN={CF_TUNNEL_TOKEN}"] = "1"
@@ -150,27 +148,27 @@ async def tts_start(secret: str = ""):
         "runtype": "args",
     }
 
-    r = requests.put(
-        f"{BASE_URL}/asks/{best['id']}/",
-        headers=vast_headers(),
-        json=create_body,
-    )
-    if r.status_code not in (200, 201):
-        raise HTTPException(status_code=500, detail=f"Error creando instancia: {r.status_code} {r.text[:200]}")
+    last_error = ""
+    for offer in offers:
+        r = requests.put(
+            f"{BASE_URL}/asks/{offer['id']}/",
+            headers=vast_headers(),
+            json=create_body,
+        )
+        if r.status_code in (200, 201):
+            result = r.json()
+            new_contract = result.get("new_contract")
+            if new_contract:
+                current_instance_id = str(new_contract)
+                return {
+                    "message": "Instancia creada, arrancando...",
+                    "instance_id": current_instance_id,
+                    "gpu": offer.get("gpu_name", ""),
+                    "cost_per_hour": round(offer.get("dph_total", 0), 3),
+                }
+        last_error = f"{r.status_code} {r.text[:200]}"
 
-    result = r.json()
-    new_contract = result.get("new_contract")
-    if not new_contract:
-        raise HTTPException(status_code=500, detail=f"Error creando instancia: {result}")
-
-    current_instance_id = str(new_contract)
-
-    return {
-        "message": "Instancia creada, arrancando...",
-        "instance_id": current_instance_id,
-        "gpu": best.get("gpu_name", ""),
-        "cost_per_hour": round(best.get("dph_total", 0), 3),
-    }
+    raise HTTPException(status_code=503, detail=f"No se pudo crear instancia en ninguna oferta: {last_error}")
 
 
 @app.post("/tts/stop")
