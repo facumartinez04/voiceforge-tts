@@ -35,18 +35,23 @@ def verify_secret(secret: str):
         raise HTTPException(status_code=403, detail="Secret invalido")
 
 
+MIN_GPU_RAM_GB = 12
+
+
 def search_gpu_offers():
-    """Busca GPUs disponibles usando POST /bundles/ de Vast.ai."""
+    """Busca GPUs disponibles con al menos 12GB VRAM."""
+    all_offers = []
+
     search_params = {
         "verified": {"eq": True},
         "rentable": {"eq": True},
-        "gpu_ram": {"gte": 12},
+        "gpu_ram": {"gte": MIN_GPU_RAM_GB},
         "cuda_max_good": {"gte": 12.0},
         "disk_space": {"gte": 30},
         "num_gpus": {"eq": 1},
         "order": [["dph_total", "asc"]],
         "type": "on-demand",
-        "limit": 10,
+        "limit": 20,
     }
     try:
         r = requests.post(
@@ -56,28 +61,32 @@ def search_gpu_offers():
         )
         if r.status_code == 200:
             data = r.json()
-            offers = data.get("offers", [])
-            if offers:
-                return offers
+            all_offers = data.get("offers", [])
     except Exception:
         pass
 
-    try:
-        query = "rentable=true gpu_ram>=12 cuda_max_good>=12.0 disk_space>=30 num_gpus=1"
-        r = requests.get(
-            f"{BASE_URL}/search/offers/",
-            headers=vast_headers(),
-            params={"q": query, "order": "dph_total", "type": "on-demand", "limit": "5"},
-        )
-        if r.status_code == 200:
-            data = r.json()
-            offers = data.get("offers", data.get("results", []))
-            if isinstance(offers, list) and offers:
-                return offers
-    except Exception:
-        pass
+    if not all_offers:
+        try:
+            query = f"rentable=true gpu_ram>={MIN_GPU_RAM_GB} cuda_max_good>=12.0 disk_space>=30 num_gpus=1"
+            r = requests.get(
+                f"{BASE_URL}/search/offers/",
+                headers=vast_headers(),
+                params={"q": query, "order": "dph_total", "type": "on-demand", "limit": "20"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                all_offers = data.get("offers", data.get("results", []))
+                if not isinstance(all_offers, list):
+                    all_offers = []
+        except Exception:
+            pass
 
-    return None
+    filtered = [o for o in all_offers if o.get("gpu_ram", 0) >= MIN_GPU_RAM_GB * 1024]
+    if not filtered:
+        filtered = [o for o in all_offers if o.get("gpu_ram", 0) >= MIN_GPU_RAM_GB]
+
+    filtered.sort(key=lambda o: o.get("dph_total", 999))
+    return filtered or None
 
 
 @app.get("/tts/status")
