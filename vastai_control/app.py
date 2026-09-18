@@ -36,24 +36,7 @@ def verify_secret(secret: str):
 
 
 def search_gpu_offers():
-    """Busca GPUs disponibles usando la API de Vast.ai."""
-    query = "rentable=true gpu_ram>=11 cuda_max_good>=12.0 disk_space>=30 reliability2>=0.9 num_gpus=1"
-
-    for endpoint in ["/search/offers/", "/bundles/"]:
-        try:
-            r = requests.get(
-                f"{BASE_URL}{endpoint}",
-                headers=vast_headers(),
-                params={"q": query, "order": "dph_total", "type": "on-demand", "limit": "5"},
-            )
-            if r.status_code == 200:
-                data = r.json()
-                offers = data.get("offers", data.get("results", []))
-                if isinstance(offers, list) and offers:
-                    return offers
-        except Exception:
-            continue
-
+    """Busca GPUs disponibles usando POST /bundles/ de Vast.ai."""
     search_params = {
         "verified": {"eq": True},
         "rentable": {"eq": True},
@@ -63,15 +46,36 @@ def search_gpu_offers():
         "num_gpus": {"eq": 1},
         "order": [["dph_total", "asc"]],
         "type": "on-demand",
+        "limit": 5,
     }
-    r = requests.get(
-        f"{BASE_URL}/bundles/",
-        headers=vast_headers(),
-        params={"q": json.dumps(search_params), "limit": "5"},
-    )
-    if r.status_code == 200:
-        data = r.json()
-        return data.get("offers", [])
+    try:
+        r = requests.post(
+            f"{BASE_URL}/bundles/",
+            headers=vast_headers(),
+            json=search_params,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            offers = data.get("offers", [])
+            if offers:
+                return offers
+    except Exception:
+        pass
+
+    try:
+        query = "rentable=true gpu_ram>=11 cuda_max_good>=12.0 disk_space>=30 num_gpus=1"
+        r = requests.get(
+            f"{BASE_URL}/search/offers/",
+            headers=vast_headers(),
+            params={"q": query, "order": "dph_total", "type": "on-demand", "limit": "5"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            offers = data.get("offers", data.get("results", []))
+            if isinstance(offers, list) and offers:
+                return offers
+    except Exception:
+        pass
 
     return None
 
