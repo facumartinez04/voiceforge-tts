@@ -40,13 +40,13 @@ def search_gpu_offers():
     search_params = {
         "verified": {"eq": True},
         "rentable": {"eq": True},
-        "gpu_ram": {"gte": 11},
+        "gpu_ram": {"gte": 12},
         "cuda_max_good": {"gte": 12.0},
         "disk_space": {"gte": 30},
         "num_gpus": {"eq": 1},
         "order": [["dph_total", "asc"]],
         "type": "on-demand",
-        "limit": 5,
+        "limit": 10,
     }
     try:
         r = requests.post(
@@ -63,7 +63,7 @@ def search_gpu_offers():
         pass
 
     try:
-        query = "rentable=true gpu_ram>=11 cuda_max_good>=12.0 disk_space>=30 num_gpus=1"
+        query = "rentable=true gpu_ram>=12 cuda_max_good>=12.0 disk_space>=30 num_gpus=1"
         r = requests.get(
             f"{BASE_URL}/search/offers/",
             headers=vast_headers(),
