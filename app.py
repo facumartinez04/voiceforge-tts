@@ -43,6 +43,7 @@ xtts_model = None
 qwen_06b_model = None
 qwen_17b_model = None
 device_name = "cpu"
+qwen_load_error = None
 
 
 def free_vram():
@@ -116,6 +117,8 @@ def load_qwen_model(variant: str = "0.6b"):
         logger.info(f"✅ Qwen3-TTS {label} inicializado en GPU (FP32) y listo.")
         return loaded
     except Exception as e:
+        global qwen_load_error
+        qwen_load_error = str(e)
         logger.error(f"Error al cargar Qwen3-TTS {label}: {e}", exc_info=True)
         return None
 
@@ -246,11 +249,14 @@ async def health_check():
     
     return {
         "status": "online",
+        "qwen_06b_loaded": qwen_06b_model is not None,
         "f5_loaded": f5_model is not None,
         "xtts_loaded": xtts_model is not None,
         "device": device_name,
         "gpu_available": gpu_available,
         "gpu_name": gpu_info,
+        "gpu_ram_mb": round(torch.cuda.get_device_properties(0).total_mem / 1024**2) if gpu_available else 0,
+        "qwen_error": qwen_load_error,
         "default_engine": "F5-TTS (Flow Matching)"
     }
 
