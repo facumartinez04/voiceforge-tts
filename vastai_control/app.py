@@ -135,15 +135,16 @@ async def tts_start(secret: str = ""):
     if not offers:
         raise HTTPException(status_code=503, detail="No hay GPUs disponibles en Vast.ai o la API key es inválida")
 
-    env_vars = {"-p 29783:29783": "1", "-e PORT=29783": "1"}
+    env_vars = {"PORT": "29783"}
     if CF_TUNNEL_TOKEN:
-        env_vars[f"-e CLOUDFLARE_TUNNEL_TOKEN={CF_TUNNEL_TOKEN}"] = "1"
+        env_vars["CLOUDFLARE_TUNNEL_TOKEN"] = CF_TUNNEL_TOKEN
 
     create_body = {
         "client_id": "me",
         "image": DOCKER_IMAGE,
         "disk": 40,
         "env": env_vars,
+        "onstart": None,
         "args": [],
         "runtype": "args",
     }
