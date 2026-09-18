@@ -35,6 +35,47 @@ def verify_secret(secret: str):
         raise HTTPException(status_code=403, detail="Secret invalido")
 
 
+def search_gpu_offers():
+    """Busca GPUs disponibles usando la API de Vast.ai."""
+    query = "rentable=true gpu_ram>=11 cuda_max_good>=12.0 disk_space>=30 reliability2>=0.9 num_gpus=1"
+
+    for endpoint in ["/search/offers/", "/bundles/"]:
+        try:
+            r = requests.get(
+                f"{BASE_URL}{endpoint}",
+                headers=vast_headers(),
+                params={"q": query, "order": "dph_total", "type": "on-demand", "limit": "5"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                offers = data.get("offers", data.get("results", []))
+                if isinstance(offers, list) and offers:
+                    return offers
+        except Exception:
+            continue
+
+    search_params = {
+        "verified": {"eq": True},
+        "rentable": {"eq": True},
+        "gpu_ram": {"gte": 11},
+        "cuda_max_good": {"gte": 12.0},
+        "disk_space": {"gte": 30},
+        "num_gpus": {"eq": 1},
+        "order": [["dph_total", "asc"]],
+        "type": "on-demand",
+    }
+    r = requests.get(
+        f"{BASE_URL}/bundles/",
+        headers=vast_headers(),
+        params={"q": json.dumps(search_params), "limit": "5"},
+    )
+    if r.status_code == 200:
+        data = r.json()
+        return data.get("offers", [])
+
+    return None
+
+
 @app.get("/tts/status")
 async def tts_status(secret: str = ""):
     verify_secret(secret)
@@ -86,28 +127,9 @@ async def tts_start(secret: str = ""):
     if not DOCKER_IMAGE:
         raise HTTPException(status_code=500, detail="Falta DOCKER_IMAGE en env")
 
-    search_params = {
-        "verified": {"eq": True},
-        "rentable": {"eq": True},
-        "gpu_ram": {"gte": 11},
-        "cuda_max_good": {"gte": 12.0},
-        "disk_space": {"gte": 30},
-        "inet_down": {"gte": 100},
-        "reliability2": {"gte": 0.9},
-        "num_gpus": {"eq": 1},
-        "order": [["dph_total", "asc"]],
-        "type": "on-demand",
-    }
-
-    r = requests.get(
-        f"{BASE_URL}/bundles",
-        headers=vast_headers(),
-        params={"q": json.dumps(search_params), "limit": "3"},
-    )
-    r.raise_for_status()
-    offers = r.json().get("offers", [])
+    offers = search_gpu_offers()
     if not offers:
-        raise HTTPException(status_code=503, detail="No hay GPUs disponibles en Vast.ai")
+        raise HTTPException(status_code=503, detail="No hay GPUs disponibles en Vast.ai o la API key es inválida")
 
     best = offers[0]
 
@@ -129,7 +151,9 @@ async def tts_start(secret: str = ""):
         headers=vast_headers(),
         json=create_body,
     )
-    r.raise_for_status()
+    if r.status_code not in (200, 201):
+        raise HTTPException(status_code=500, detail=f"Error creando instancia: {r.status_code} {r.text[:200]}")
+
     result = r.json()
     new_contract = result.get("new_contract")
     if not new_contract:
