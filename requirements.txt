@@ -18,3 +18,7 @@ qwen-tts>=0.1.0
 soundfile>=0.12.1
 numpy>=1.22.0
 scipy>=1.11.0
+
+# Whisper (Speech-to-Text)
+faster-whisper>=1.0.0
+whisperx>=3.1.0

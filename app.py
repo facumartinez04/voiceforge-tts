@@ -44,6 +44,7 @@ qwen_06b_model = None
 qwen_17b_model = None
 device_name = "cpu"
 qwen_load_error = None
+whisper_model = None
 
 
 def free_vram():
@@ -250,6 +251,7 @@ async def health_check():
     return {
         "status": "online",
         "qwen_06b_loaded": qwen_06b_model is not None,
+        "whisper_loaded": whisper_model is not None,
         "f5_loaded": f5_model is not None,
         "xtts_loaded": xtts_model is not None,
         "device": device_name,
@@ -610,6 +612,128 @@ async def delete_voice(filename: str):
         return {"message": f"Voz '{safe_filename}' eliminada correctamente."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"No se pudo eliminar: {e}")
+
+
+WHISPER_MODEL_SIZE = "large-v3-turbo"
+INITIAL_PROMPT_ES = (
+    "Bueno, che, no sé viste, esto es una transmisión en vivo bien informal, "
+    "con groserías, risas, nombres de streamers y de juegos, todo mezclado."
+)
+_align_model_cache = {}
+
+
+def load_whisper_model():
+    global whisper_model
+    if whisper_model is not None:
+        return whisper_model
+    from faster_whisper import WhisperModel
+    compute = "float16" if device_name == "cuda" else "int8"
+    logger.info(f"Cargando Whisper '{WHISPER_MODEL_SIZE}' en {device_name} ({compute})...")
+    whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device=device_name, compute_type=compute)
+    logger.info("Whisper cargado.")
+    return whisper_model
+
+
+def get_align_model(language, device="cpu"):
+    if language not in _align_model_cache:
+        import whisperx
+        model_a, metadata = whisperx.load_align_model(language_code=language, device=device)
+        _align_model_cache[language] = (model_a, metadata)
+    return _align_model_cache[language]
+
+
+def align_segments(raw_segments, audio_path, language, device="cpu"):
+    if not raw_segments:
+        return None
+    try:
+        import whisperx
+        model_a, metadata = get_align_model(language, device)
+        audio = whisperx.load_audio(audio_path)
+        result = whisperx.align(raw_segments, model_a, metadata, audio, device, return_char_alignments=False)
+        return result.get("segments")
+    except Exception as e:
+        logger.warning(f"Forced alignment failed, using Whisper timestamps: {e}")
+        return None
+
+
+def transcribe_audio(audio_path: str, language: str = "es"):
+    model = load_whisper_model()
+    segments, info = model.transcribe(
+        audio_path,
+        language=language,
+        beam_size=3,
+        best_of=3,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500, speech_pad_ms=200),
+        condition_on_previous_text=False,
+        word_timestamps=True,
+        initial_prompt=INITIAL_PROMPT_ES if language == "es" else None,
+    )
+
+    whisper_segments = []
+    for seg in segments:
+        seg_data = {"start": round(seg.start, 3), "end": round(seg.end, 3), "text": seg.text.strip()}
+        if seg.words:
+            seg_data["words"] = [
+                {"word": w.word.strip(), "start": round(w.start, 3), "end": round(w.end, 3)}
+                for w in seg.words if w.word.strip()
+            ]
+        whisper_segments.append(seg_data)
+
+    aligned = align_segments(
+        [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in whisper_segments],
+        audio_path, language,
+    )
+
+    segments_out = []
+    if aligned:
+        for seg in aligned:
+            words = seg.get("words") or []
+            cleaned_words = [
+                {"word": w["word"].strip(), "start": round(w["start"], 3), "end": round(w["end"], 3)}
+                for w in words if w.get("word", "").strip() and w.get("start") is not None and w.get("end") is not None
+            ]
+            if not cleaned_words:
+                continue
+            segments_out.append({
+                "start": cleaned_words[0]["start"],
+                "end": cleaned_words[-1]["end"],
+                "text": " ".join(w["word"] for w in cleaned_words),
+                "words": cleaned_words,
+            })
+    if not segments_out:
+        segments_out = whisper_segments
+
+    return {"segments": segments_out, "language": info.language, "duration": info.duration}
+
+
+@app.post("/api/whisper", summary="Transcribir audio con Whisper + alineamiento forzado")
+async def whisper_transcribe(
+    audio: UploadFile = File(..., description="Archivo de audio a transcribir"),
+    language: str = Form("es", description="Código de idioma (es, en, pt, etc.)"),
+):
+    temp_path = OUTPUTS_DIR / f"whisper_{uuid.uuid4().hex[:12]}{Path(audio.filename or 'audio.wav').suffix}"
+    try:
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(audio.file, f)
+
+        start_time = time.time()
+        result = await run_in_threadpool(transcribe_audio, str(temp_path), language)
+        elapsed = round(time.time() - start_time, 2)
+
+        result["inference_time"] = elapsed
+        result["device"] = device_name
+        result["model"] = WHISPER_MODEL_SIZE
+        return result
+    except Exception as e:
+        logger.error(f"Error en transcripción Whisper: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error en transcripción: {str(e)}")
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

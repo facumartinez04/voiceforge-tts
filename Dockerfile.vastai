@@ -30,7 +30,10 @@ RUN wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/c
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir edge-tts
+    pip install --no-cache-dir edge-tts && \
+    pip install --no-cache-dir faster-whisper && \
+    pip install --no-cache-dir whisperx --no-deps && \
+    pip install --no-cache-dir nltk transformers || true
 
 COPY . .
 
